@@ -6,7 +6,6 @@ interface GraphData {
     nodes: Array<{
         id: string;
         name?: string;
-        scale?: number;
         image?: string;
     }>;
     links: Array<{
@@ -22,22 +21,15 @@ interface GraphBaseConfig {
     height: number;
     themeColor?: RGB;
     nodeColor?: RGB;
-    nodeHlColor?: RGB;
-    circleColor?: RGB;
     lineColor?: RGB;
-    lineHlColor?: RGB;
     dashSize?: number;
     dashScale?: number;
     gapSize?: number;
-    dashOffset?: number;
     nodeSize?: number;
-    arrowSize?: number;
     lineWidth?: number;
-    showArrow?: boolean;
     backgroundColor?: RGB;
     highLightColor?: RGB;
     showStatTable?: boolean;
-    roundedImage?: boolean;
     zoomNear?: number;
     zoomFar?: number;
     debug?: boolean;
@@ -56,7 +48,6 @@ interface ProcessedData extends D3ForceData {
     nodeInfoMap: {
         [key: string]: {
             index: number;
-            scale?: number;
             image?: string;
             name?: string;
             imageTexture?: THREE.Texture;

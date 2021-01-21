@@ -8,6 +8,8 @@ const LineMaterial_1 = require("three/examples/jsm/lines/LineMaterial");
 const svgLoader_1 = require("./svgLoader");
 const v3 = require("v3js");
 const worker = require("./worker.js");
+const arrowsVS = require("./shaders/arrows.vs");
+const arrowsFS = require("./shaders/arrows.fs");
 const mitt_1 = require("mitt");
 require("./index.css");
 const textureLoader = new THREE.TextureLoader();
@@ -18,19 +20,14 @@ const GRAPH_BASE_CONFIG = {
     nodeSize: 35,
     themeColor: [33 / 255, 126 / 255, 242 / 255],
     nodeColor: [1, 1, 1],
-    nodeHlColor: [1, 1, 0],
     lineColor: [44.286 / 255, 103.625 / 255, 130.394 / 255],
-    lineHlColor: [1, 1, 0],
+    highLightColor: [1, 1, 0],
+    backgroundColor: [51 / 255, 56 / 255, 64 / 255],
     dashSize: 5,
     gapSize: 3,
     dashScale: 1,
-    arrowSize: 1250,
     lineWidth: 1,
-    showArrow: true,
-    backgroundColor: [0, 0, 16],
-    highLightColor: [255, 0, 0],
     showStatTable: true,
-    roundedImage: true,
     zoomNear: 75,
     zoomFar: 17000,
     debug: false
@@ -126,7 +123,6 @@ class D3ForceGraph {
                 });
                 result.nodeInfoMap[e.id] = {
                     index: nodeCount,
-                    scale: e.scale,
                     image: e.image,
                     name: e.name
                 };
@@ -231,7 +227,7 @@ class D3ForceGraph {
     }
     prepareScene() {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(this.config.backgroundColor[0] / 255, this.config.backgroundColor[1] / 255, this.config.backgroundColor[2] / 255);
+        this.scene.background = new THREE.Color(...this.config.backgroundColor);
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             logarithmicDepthBuffer: true
@@ -400,7 +396,6 @@ class D3ForceGraph {
                             }
                         }
                         this.perfInfo.targetTick = event.data.currentTick;
-                        console.log('tick' + this.perfInfo.targetTick);
                     }
                     this.events.emit('tick', {
                         layoutProgress: this.perfInfo.layoutProgress
@@ -408,25 +403,10 @@ class D3ForceGraph {
                     break;
                 }
                 case ('end'): {
-                    console.log('end');
                     this.perfInfo.layouting = false;
                     this.targetPositionStatus = new Float32Array(event.data.nodes);
-                    // this.$container.addEventListener('mousemove', this.mouseMoveHandlerBinded, false)
-                    // this.$container.addEventListener('mouseout', this.mouseOutHandlerBinded, false)
-                    // 布局结束后，如果鼠标不在图像区域，就停止渲染（节能）
-                    // setTimeout(() => {
-                    //   if(this.config.showArrow) {
-                    //     // this.renderArrow()
-                    //   }
-                    //
-                    //   this.events.emit('end')
-                    //
-                    //   setTimeout(() => {
-                    //     if(!this.mouseStatus.mouseOnChart) {
-                    //       // this.stopRender()
-                    //     }
-                    //   }, 2000)
-                    // }, 2000)
+                    this.$container.addEventListener('mousemove', this.mouseMoveHandlerBinded, false);
+                    this.$container.addEventListener('mouseout', this.mouseOutHandlerBinded, false);
                     break;
                 }
             }
@@ -462,10 +442,10 @@ class D3ForceGraph {
         if (this.camera.position.z > this.config.zoomFar) {
             this.camera.position.set(this.camera.position.x, this.camera.position.y, this.config.zoomFar);
         }
-        // this.perfInfo.layouting && this.renderTopo()
+        this.perfInfo.layouting && this.renderTopo();
         !this.perfInfo.layouting && this.renderLineAnimation();
         this.checkFinalStatus();
-        // this.updateHighLight()
+        this.updateHighLight();
         this.renderer.render(this.scene, this.camera);
         this.controls && this.controls.update();
         this.startRender();
@@ -475,7 +455,7 @@ class D3ForceGraph {
         if (this.perfInfo.nodeCounts > 1000) {
             let now = Date.now();
             let stepTime = now - this.perfInfo.prevTickTime;
-            if (stepTime <= this.perfInfo.intervalTime) {
+            if (stepTime <= this.perfInfo.intervalTime && this.currentPositionStatus) {
                 for (let i = 0; i < this.currentPositionStatus.length; i++) {
                     this.currentPositionStatus[i] = (this.targetPositionStatus[i] - this.cachePositionStatus[i]) / this.perfInfo.intervalTime * stepTime + this.cachePositionStatus[i];
                 }
@@ -500,23 +480,27 @@ class D3ForceGraph {
         if (!this.perfInfo.layouting && this.currentPositionStatus && (this.currentPositionStatus[0] !== this.targetPositionStatus[0])) {
             this.currentPositionStatus = this.targetPositionStatus;
             this.updatePosition(this.currentPositionStatus);
+            this.updateCirclePosition(this.currentPositionStatus);
+            this.renderArrow();
         }
     }
     renderArrow() {
         this.arrows.geometry = new THREE.BufferGeometry();
         this.arrows.positions = new Float32Array(this.perfInfo.linkCounts * 3);
-        this.arrows.rotates = new Float32Array(this.perfInfo.linkCounts * 2);
-        this.arrows.material = new THREE.PointsMaterial({
-            size: this.config.nodeSize * 0.5,
-            map: textureLoader.load(textureMap['arrow'.toUpperCase()]),
-            color: new THREE.Color(...this.config.themeColor),
-            opacity: 0.373,
+        this.arrows.rotates = new Float32Array(this.perfInfo.linkCounts);
+        this.arrows.material = new THREE.ShaderMaterial({
             transparent: true,
-            depthTest: false // 解决透明度问题
+            uniforms: {
+                map: { value: textureLoader.load(textureMap['arrow'.toUpperCase()]) },
+                size: { value: this.config.nodeSize * 0.75 * 320 },
+                color: { value: new THREE.Vector3(...this.config.themeColor) }
+            },
+            vertexShader: arrowsVS(),
+            fragmentShader: arrowsFS()
         });
-        let vec = new v3.Vector3(0, 1, 0);
-        let up = new v3.Vector3(0, 1, 0);
-        let offsetDistance = (this.config.arrowSize + this.config.nodeSize) / 1125;
+        let vec = new v3.Vector3(0, 0, 0);
+        let up = new v3.Vector3(1, 0, 0);
+        let offsetDistance = 0.385 * this.config.nodeSize;
         this.processedData.links.forEach((e, i) => {
             // 计算箭头的旋转方向与偏移位置
             let vecX = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - this.currentPositionStatus[this.processedData.nodeInfoMap[e.source].index * 2];
@@ -527,17 +511,16 @@ class D3ForceGraph {
             let vecNorm = v3.Vector3.getNorm(vec);
             let offsetX = vecX * offsetDistance / vecNorm;
             let offsetY = vecY * offsetDistance / vecNorm;
-            if (vecX < 0) {
+            if (vecY > 0) {
                 angle = 2 * Math.PI - angle;
             }
             this.arrows.positions[i * 3] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - offsetX;
             this.arrows.positions[i * 3 + 1] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2 + 1] - offsetY;
             this.arrows.positions[i * 3 + 2] = -0.0007;
-            this.arrows.rotates[i * 2] = Math.random();
-            this.arrows.rotates[i * 2 + 1] = Math.random();
+            this.arrows.rotates[i] = angle;
         });
         this.arrows.geometry.setAttribute('position', new THREE.BufferAttribute(this.arrows.positions, 3));
-        this.arrows.geometry.setAttribute('uv', new THREE.BufferAttribute(this.arrows.rotates, 2));
+        this.arrows.geometry.setAttribute('rotate', new THREE.BufferAttribute(this.arrows.rotates, 1));
         this.arrows.geometry.computeBoundingSphere();
         this.arrows.mesh = new THREE.Points(this.arrows.geometry, this.arrows.material);
         this.arrows.mesh.name = 'arrows';
@@ -551,8 +534,6 @@ class D3ForceGraph {
         Object.keys(this.lines).forEach((name) => {
             this.updateLinePosition(name, nodesPosition);
         });
-        this.updateCirclePosition(nodesPosition);
-        this.renderArrow();
     }
     updateNodePosition(name, nodesPosition) {
         let nodeConfig = this.nodes[name].config;
@@ -622,7 +603,7 @@ class D3ForceGraph {
                         let name = obj.object.name.split('-')[1];
                         if (type === 'basePoints') {
                             let pointIndex = this.nodes[name].config.indexArr[obj.index];
-                            pointIndex === nodeIndex && this.hlNodes.push({ name: name, index: obj.index });
+                            pointIndex === nodeIndex && this.hlNodes.push({ name: name, index: obj.index }) && this.prepareHlTextsMesh(id);
                         }
                         else {
                             let startNodeIndex = this.lines[name].config.indexArr[obj.faceIndex * 2];
@@ -685,10 +666,6 @@ class D3ForceGraph {
         this.scene.remove(node);
         this.scene.remove(line);
         this.scene.remove(text);
-        if (this.config.showArrow) {
-            let arrow = this.scene.getObjectByName('hlArrows');
-            this.scene.remove(arrow);
-        }
         this.highlighted = null;
         this.$container.classList.remove('hl');
         this.highlightLines(false);
@@ -700,63 +677,10 @@ class D3ForceGraph {
     addHighLight() {
         this.highlightLines(true);
         this.highlightNodes(true);
-        // if(this.config.showArrow) {
-        //   this.hlArrows.geometry = new THREE.BufferGeometry()
-        //   this.hlArrows.positions = new Float32Array(links.length * 3)
-        //   this.hlArrows.rotates = new Float32Array(links.length)
-        //
-        //   this.hlArrows.material = new THREE.ShaderMaterial({
-        //     uniforms: {
-        //       texture: {
-        //         type: 't',
-        //         value: ARROW_TEXTURE
-        //       },
-        //       'u_compensation': {
-        //         value: window.devicePixelRatio * this.config.height / BASE_HEIGHT
-        //       }
-        //     },
-        //     vertexShader: hlArrowsVS({
-        //       arrowSize: (this.config.arrowSize + 25).toFixed(8)
-        //     }),
-        //     fragmentShader: hlArrowsFS()
-        //   })
-        //
-        //   let vec = new v3.Vector3(0, 1, 0)
-        //   let up = new v3.Vector3(0, 1, 0)
-        //   let offsetDistance = (this.config.arrowSize + this.config.nodeSize) / 1125
-        //
-        //   links.forEach((e, i) => {
-        //
-        //     // 计算箭头的旋转方向与偏移位置
-        //     let vecX = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - this.currentPositionStatus[this.processedData.nodeInfoMap[e.source].index * 2]
-        //     let vecY = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2 + 1] - this.currentPositionStatus[this.processedData.nodeInfoMap[e.source].index * 2 + 1]
-        //     vec.x = vecX
-        //     vec.y = vecY
-        //     let angle = v3.Vector3.getAngle(vec, up)
-        //     let vecNorm = v3.Vector3.getNorm(vec)
-        //     let offsetX = vecX * offsetDistance / vecNorm
-        //     let offsetY = vecY * offsetDistance / vecNorm
-        //     if(vecX < 0) {
-        //       angle = 2 * Math.PI - angle
-        //     }
-        //     this.hlArrows.rotates[i] = angle
-        //
-        //     this.hlArrows.positions[i * 3] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - offsetX
-        //     this.hlArrows.positions[i * 3 + 1] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2 + 1] - offsetY
-        //     this.hlArrows.positions[i * 3 + 2] = -0.0004
-        //   })
-        //
-        //   this.hlArrows.geometry.setAttribute('position', new THREE.BufferAttribute(this.hlArrows.positions, 3))
-        //   this.hlArrows.geometry.setAttribute('rotate', new THREE.BufferAttribute(this.hlArrows.rotates, 1))
-        //   this.hlArrows.geometry.computeBoundingSphere()
-        //   this.hlArrows.mesh = new THREE.Points(this.hlArrows.geometry, this.hlArrows.material)
-        //   this.hlArrows.mesh.name = 'hlArrows'
-        //   this.scene.add(this.hlArrows.mesh)
-        // }
         this.$container.classList.add('hl');
     }
     highlightNodes(isHighlight) {
-        let color = isHighlight ? this.config.nodeHlColor : this.config.nodeColor;
+        let color = isHighlight ? this.config.highLightColor : this.config.nodeColor;
         let nameMap = {};
         this.hlNodes.forEach(node => {
             let name = node.name;
@@ -772,7 +696,7 @@ class D3ForceGraph {
         });
     }
     highlightLines(isHighlight) {
-        let color = isHighlight ? this.config.lineHlColor : this.config.lineColor;
+        let color = isHighlight ? this.config.highLightColor : this.config.lineColor;
         let nameMap = {};
         this.hlLines.forEach(line => {
             let name = line.name;
@@ -840,9 +764,9 @@ class D3ForceGraph {
     chartMouseLeaveHandler() {
         this.mouseStatus.mouseOnChart = false;
         // 关闭渲染
-        if (!this.perfInfo.layouting && !this.lockHighlightToken) {
-            this.stopRender();
-        }
+        // if(!this.perfInfo.layouting && !this.lockHighlightToken) {
+        //   this.stopRender()
+        // }
     }
     // 绑定事件
     bindEvent() {
@@ -865,16 +789,31 @@ class D3ForceGraph {
         this.targetPositionStatus = null;
         this.currentPositionStatus = null;
         this.cachePositionStatus = null;
+        this.processedData = null;
+        this.data = null;
         this.nodes = {};
         this.lines = {};
         this.hlLines = [];
         this.hlNodes = [];
+        this.circles = {
+            geometry: null,
+            positions: null,
+            material: null,
+            mesh: null
+        };
         this.hlText = {
             geometry: null,
             material: null,
             mesh: null
         };
+        this.arrows = {
+            geometry: null,
+            positions: null,
+            material: null,
+            mesh: null
+        };
         this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
+        this.$container = null;
         this.renderer = null;
     }
     resize(width, height) {

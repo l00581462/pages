@@ -2,56 +2,90 @@
   <head>
     <title>Demo</title>
     <script src="./dist/d3-force-graph.js"></script>
+    <style>
+      .setting {
+        display: flex;
+        height: 50px;
+        line-height: 50px;
+        justify-content: space-around;
+        background: #242424;
+        color: #aaaaaa;
+      }
+      body {
+        padding: 0;
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
+    <div class="setting">
+      <div>
+        <span>nodeNum </span>
+        <select id="nodeNum">
+          <option value="2" selected>2</option>
+          <option value="10">10</option>
+          <option value="100">100</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+          <option value="5000">5000</option>
+          <option value="10000">10000</option>
+          <option value="50000">50000</option>
+          <option value="100000">100000</option>
+        </select>
+      </div>
+
+      <div>
+        <span>linkNum </span>
+        <span id="linkNum"></span>
+      </div>
+    </div>
     <div id="container"></div>
     <script>
       window.onload = () => {
-        let $container = document.getElementById('container')
-        let testData = {
-          nodes: [],
-          links: []
-        }
-        let nodeType = [
-          'APPLICATION',
-          'POD',
-          'PROCESS',
-          'WORKLOAD',
-          'NODE',
-          'MIDDLEWARE'
-        ]
-        let lineType = [
-          'createOn',
-          'tracingTo'
-        ]
-        let nodeNum = 10000
+        let $container = document.getElementById("container");
+        let $nodeNum = document.getElementById("nodeNum");
+        let $linkNum = document.getElementById("linkNum");
+        let nodeType = ["APPLICATION", "POD", "PROCESS", "WORKLOAD", "NODE", "MIDDLEWARE"];
+        let lineType = ["createOn", "tracingTo"];
+        let graph = null;
+        changeNodeNum();
+        $nodeNum.addEventListener("change", changeNodeNum);
 
-        for(let i = 0; i < nodeNum; i++){
-          testData.nodes.push({
-            id: 'node' + i,
-            image: nodeType[Math.floor(Math.random() * nodeType.length)]
-          })
-        }
+        function changeNodeNum() {
+          let testData = {
+            nodes: [],
+            links: [],
+          };
+          let nodeNum = parseInt($nodeNum.value);
+          $linkNum.innerText = nodeNum / 2;
 
-        for(let i = 0; i < nodeNum / 2; i++){
-          let line = {
-            source: 'node' + Math.floor(Math.random() * nodeNum),
-            target: 'node' + Math.floor(Math.random() * nodeNum),
-            lineType: lineType[Math.floor(Math.random() * lineType.length)]
+          for (let i = 0; i < nodeNum; i++) {
+            testData.nodes.push({
+              id: "node" + i,
+              image: nodeType[Math.floor(Math.random() * nodeType.length)],
+            });
           }
-          if(line.lineType === lineType[1]){
-            line.speed = Math.random() * 10000
+
+          for (let i = 0; i < nodeNum / 2; i++) {
+            let line = {
+              source: "node" + Math.floor(Math.random() * nodeNum),
+              target: "node" + Math.floor(Math.random() * nodeNum),
+              lineType: lineType[Math.floor(Math.random() * lineType.length)],
+            };
+            if (line.lineType === lineType[1]) {
+              line.speed = Math.random() * 10000;
+            }
+            testData.links.push(line);
           }
-          testData.links.push(line)
+          if (graph) {
+            graph.destroy();
+          }
+          graph = new D3ForceGraph($container, testData, {
+            width: window.innerWidth,
+            height: window.innerHeight - 50,
+          });
         }
-        console.log(testData)
-        a = new D3ForceGraph($container, testData, {
-          width: window.innerWidth - 20,
-          height: window.innerHeight - 20,
-          backgroundColor: [51, 56, 64],
-          zoomNear: 50
-        })
-      }
+      };
     </script>
   </body>
 </html>
