@@ -10,6 +10,8 @@ const v3 = require("v3js");
 const worker = require("./worker.js");
 const arrowsVS = require("./shaders/arrows.vs");
 const arrowsFS = require("./shaders/arrows.fs");
+const textFS = require("./shaders/text.fs");
+const textVS = require("./shaders/text.vs");
 const mitt_1 = require("mitt");
 require("./index.css");
 const textureLoader = new THREE.TextureLoader();
@@ -18,6 +20,7 @@ const GRAPH_BASE_CONFIG = {
     width: 400,
     height: 400,
     nodeSize: 35,
+    eventNodeSize: 15,
     themeColor: [33 / 255, 126 / 255, 242 / 255],
     nodeColor: [1, 1, 1],
     lineColor: [44.286 / 255, 103.625 / 255, 130.394 / 255],
@@ -51,6 +54,7 @@ class D3ForceGraph {
             mousePosition: new THREE.Vector2(-9999, -9999)
         };
         this.nodes = {};
+        this.eventNodes = {};
         this.lines = {};
         this.circles = {
             geometry: null,
@@ -59,6 +63,13 @@ class D3ForceGraph {
             positions: null
         };
         this.arrows = {
+            geometry: null,
+            material: null,
+            rotates: null,
+            mesh: null,
+            positions: null
+        };
+        this.speedUnits = {
             geometry: null,
             material: null,
             rotates: null,
@@ -113,7 +124,8 @@ class D3ForceGraph {
             nodeInfoMap: {},
             linkInfoMap: {},
             statTable: [],
-            linkBuffer: null
+            linkBuffer: null,
+            tracingToLinkBuffer: null
         };
         let nodeCount = 0;
         this.data.nodes.forEach(e => {
@@ -124,12 +136,15 @@ class D3ForceGraph {
                 result.nodeInfoMap[e.id] = {
                     index: nodeCount,
                     image: e.image,
+                    event: e.event,
+                    middleWareType: e.middleWareType,
                     name: e.name
                 };
-                if (!this.nodes[e.image]) {
-                    this.nodes[e.image] = {
+                let nodeType = this.getNodeType(e.image, e.middleWareType);
+                if (!this.nodes[nodeType]) {
+                    this.nodes[nodeType] = {
                         config: {
-                            map: textureLoader.load(textureMap[e.image.toUpperCase()]),
+                            map: textureLoader.load(textureMap[nodeType.toUpperCase()]),
                             count: 1,
                             indexArr: [nodeCount]
                         },
@@ -141,14 +156,36 @@ class D3ForceGraph {
                     };
                 }
                 else {
-                    this.nodes[e.image].config.count++;
-                    this.nodes[e.image].config.indexArr.push(nodeCount);
+                    this.nodes[nodeType].config.count++;
+                    this.nodes[nodeType].config.indexArr.push(nodeCount);
+                }
+                let eventType = this.getEventType(e.event);
+                if (eventType) {
+                    if (!this.eventNodes[eventType]) {
+                        this.eventNodes[eventType] = {
+                            config: {
+                                map: textureLoader.load(textureMap[eventType.toUpperCase()]),
+                                count: 1,
+                                indexArr: [nodeCount]
+                            },
+                            material: null,
+                            positions: null,
+                            geometry: null,
+                            mesh: null,
+                            colors: null
+                        };
+                    }
+                    else {
+                        this.eventNodes[eventType].config.count++;
+                        this.eventNodes[eventType].config.indexArr.push(nodeCount);
+                    }
                 }
                 nodeCount++;
             }
         });
         let linkCountMap = {};
         let linkBuffer = [];
+        let tracingToLinkBuffer = [];
         this.data.links.forEach(e => {
             if (e.source === e.target)
                 return;
@@ -177,6 +214,7 @@ class D3ForceGraph {
                     lineType = 'tracingTo' + lineWidth;
                     dashed = true;
                     this.perfInfo.tracingToLinkCounts++;
+                    tracingToLinkBuffer.push(result.nodeInfoMap[e.source].index, result.nodeInfoMap[e.target].index);
                 }
                 if (!this.lines[lineType]) {
                     this.lines[lineType] = {
@@ -200,6 +238,7 @@ class D3ForceGraph {
             }
         });
         result.linkBuffer = new Int32Array(linkBuffer);
+        result.tracingToLinkBuffer = new Int32Array(tracingToLinkBuffer);
         result.statTable = Object.keys(linkCountMap).map(e => {
             return {
                 source: e,
@@ -225,6 +264,18 @@ class D3ForceGraph {
         // }
         return 1;
     }
+    getEventType(event) {
+        if (event < 10)
+            return '';
+        if (event <= 20)
+            return 'event_warning';
+        return 'event_critical';
+    }
+    getNodeType(type, middleWareType) {
+        if (!middleWareType)
+            return type;
+        return type + '_' + middleWareType;
+    }
     prepareScene() {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(...this.config.backgroundColor);
@@ -248,10 +299,12 @@ class D3ForceGraph {
         Object.keys(this.nodes).forEach((name) => {
             this.prepareNodeMesh(name, this.nodes[name].config);
         });
+        Object.keys(this.eventNodes).forEach((name) => {
+            this.prepareEventNodeMesh(name, this.eventNodes[name].config);
+        });
         Object.keys(this.lines).forEach((name) => {
             this.prepareLineMesh(name, this.lines[name].config);
         });
-        this.prepareCircleMesh();
     }
     // 预准备节点与线，使用BufferGeometry，位置先定到-9999
     // z 关系
@@ -267,7 +320,7 @@ class D3ForceGraph {
         this.nodes[name].positions = new Float32Array(nodeConfig.count * 3);
         this.nodes[name].colors = new Float32Array(nodeConfig.count * 3);
         this.nodes[name].material = new THREE.PointsMaterial({
-            opacity: 0.9,
+            opacity: 0.99,
             vertexColors: true,
             map: nodeConfig.map,
             size: this.config.nodeSize,
@@ -289,6 +342,33 @@ class D3ForceGraph {
         this.nodes[name].mesh.name = 'basePoints-' + name;
         this.scene.add(this.nodes[name].mesh);
     }
+    prepareEventNodeMesh(name, nodeConfig) {
+        this.eventNodes[name].geometry = new THREE.BufferGeometry();
+        this.eventNodes[name].positions = new Float32Array(nodeConfig.count * 3);
+        this.eventNodes[name].colors = new Float32Array(nodeConfig.count * 3);
+        this.eventNodes[name].material = new THREE.PointsMaterial({
+            // opacity: 0.99,
+            vertexColors: true,
+            map: nodeConfig.map,
+            size: this.config.eventNodeSize,
+            transparent: true,
+            depthTest: false // 解决透明度问题
+        });
+        this.processedData.nodes.forEach((e, i) => {
+            this.eventNodes[name].positions[i * 3] = -9999;
+            this.eventNodes[name].positions[i * 3 + 1] = -9999;
+            this.eventNodes[name].positions[i * 3 + 2] = 0;
+            this.eventNodes[name].colors[i * 3] = this.config.nodeColor[0];
+            this.eventNodes[name].colors[i * 3 + 1] = this.config.nodeColor[1];
+            this.eventNodes[name].colors[i * 3 + 2] = this.config.nodeColor[2];
+        });
+        this.eventNodes[name].geometry.setAttribute('position', new THREE.BufferAttribute(this.eventNodes[name].positions, 3));
+        this.eventNodes[name].geometry.setAttribute('color', new THREE.BufferAttribute(this.eventNodes[name].colors, 3));
+        this.eventNodes[name].geometry.computeBoundingSphere();
+        this.eventNodes[name].mesh = new THREE.Points(this.eventNodes[name].geometry, this.eventNodes[name].material);
+        this.eventNodes[name].mesh.name = 'baseEventPoints-' + name;
+        this.scene.add(this.eventNodes[name].mesh);
+    }
     prepareLineMesh(name, linkConfig) {
         this.lines[name].geometry = new LineSegmentsGeometry_1.LineSegmentsGeometry();
         this.lines[name].positions = new Float32Array(linkConfig.count * 6);
@@ -307,10 +387,10 @@ class D3ForceGraph {
         this.processedData.links.forEach((e, i) => {
             this.lines[name].positions[i * 6] = -9999;
             this.lines[name].positions[i * 6 + 1] = -9999;
-            this.lines[name].positions[i * 6 + 2] = -0.001;
+            this.lines[name].positions[i * 6 + 2] = -0.01;
             this.lines[name].positions[i * 6 + 3] = -9999;
             this.lines[name].positions[i * 6 + 4] = -9999;
-            this.lines[name].positions[i * 6 + 5] = -0.001;
+            this.lines[name].positions[i * 6 + 5] = -0.01;
             this.lines[name].colors[i * 6] = this.config.lineColor[0];
             this.lines[name].colors[i * 6 + 1] = this.config.lineColor[1];
             this.lines[name].colors[i * 6 + 2] = this.config.lineColor[2];
@@ -334,19 +414,73 @@ class D3ForceGraph {
             color: new THREE.Color(...this.config.themeColor),
             opacity: 0.373,
             transparent: true,
-            depthTest: false // 解决透明度问题
+            depthTest: false
         });
         this.circles.material.map.needsUpdate = true;
         for (let i = 0; i < this.perfInfo.tracingToLinkCounts; i++) {
             this.circles.positions[i * 3] = -9999;
             this.circles.positions[i * 3 + 1] = -9999;
-            this.circles.positions[i * 3 + 2] = -0.0009;
+            this.circles.positions[i * 3 + 2] = -0.006;
         }
         this.circles.geometry.setAttribute('position', new THREE.BufferAttribute(this.circles.positions, 3));
         this.circles.geometry.computeBoundingSphere();
         this.circles.mesh = new THREE.Points(this.circles.geometry, this.circles.material);
         this.circles.mesh.name = 'baseCircles';
         this.scene.add(this.circles.mesh);
+    }
+    prepareArrowMesh() {
+        this.arrows.geometry = new THREE.BufferGeometry();
+        this.arrows.positions = new Float32Array(this.perfInfo.linkCounts * 3);
+        this.arrows.rotates = new Float32Array(this.perfInfo.linkCounts);
+        this.arrows.material = new THREE.ShaderMaterial({
+            transparent: true,
+            uniforms: {
+                map: { value: textureLoader.load(textureMap['arrow'.toUpperCase()]) },
+                size: { value: this.config.nodeSize * 0.75 * 320 },
+                color: { value: new THREE.Vector3(...this.config.themeColor) }
+            },
+            vertexShader: arrowsVS(),
+            fragmentShader: arrowsFS()
+        });
+        for (let i = 0; i < this.perfInfo.linkCounts; i++) {
+            this.arrows.positions[i * 3] = -9999;
+            this.arrows.positions[i * 3 + 1] = -9999;
+            this.arrows.positions[i * 3 + 2] = -0.006;
+            this.arrows.rotates[i] = 0;
+        }
+        this.arrows.geometry.setAttribute('position', new THREE.BufferAttribute(this.arrows.positions, 3));
+        this.arrows.geometry.setAttribute('rotate', new THREE.BufferAttribute(this.arrows.rotates, 1));
+        this.arrows.geometry.computeBoundingSphere();
+        this.arrows.mesh = new THREE.Points(this.arrows.geometry, this.arrows.material);
+        this.arrows.mesh.name = 'arrows';
+        this.scene.add(this.arrows.mesh);
+    }
+    prepareSpeedUnitMesh() {
+        this.speedUnits.geometry = new THREE.BufferGeometry();
+        this.speedUnits.positions = new Float32Array(this.perfInfo.tracingToLinkCounts * 3);
+        this.speedUnits.rotates = new Float32Array(this.perfInfo.tracingToLinkCounts);
+        this.speedUnits.material = new THREE.ShaderMaterial({
+            transparent: true,
+            uniforms: {
+                map: { value: this.createTextTexture('r/min', 1000, 800, 160) },
+                size: { value: this.config.nodeSize * 500 },
+                color: { value: new THREE.Vector3(1, 1, 1) }
+            },
+            vertexShader: textVS(),
+            fragmentShader: textFS()
+        });
+        for (let i = 0; i < this.perfInfo.tracingToLinkCounts; i++) {
+            this.speedUnits.positions[i * 3] = -9999;
+            this.speedUnits.positions[i * 3 + 1] = -9999;
+            this.speedUnits.positions[i * 3 + 2] = 0;
+            this.speedUnits.rotates[i] = 0;
+        }
+        this.speedUnits.geometry.setAttribute('position', new THREE.BufferAttribute(this.speedUnits.positions, 3));
+        this.speedUnits.geometry.setAttribute('rotate', new THREE.BufferAttribute(this.speedUnits.rotates, 1));
+        this.speedUnits.geometry.computeBoundingSphere();
+        this.speedUnits.mesh = new THREE.Points(this.speedUnits.geometry, this.speedUnits.material);
+        this.speedUnits.mesh.name = 'speedUnits';
+        this.scene.add(this.speedUnits.mesh);
     }
     initWorker() {
         let blob = new Blob([worker], {
@@ -361,7 +495,7 @@ class D3ForceGraph {
             DISTANCE: this.getDistance(this.perfInfo.nodeCounts),
             STRENGTH: this.getStrength(this.perfInfo.nodeCounts),
             COL: this.getCol(this.perfInfo.nodeCounts),
-            linksBuffer: this.processedData.linkBuffer.buffer
+            linksBuffer: this.processedData.linkBuffer.slice().buffer
         };
         this.worker.postMessage(message, [message.linksBuffer]);
         this.worker.onmessage = (event) => {
@@ -452,7 +586,7 @@ class D3ForceGraph {
     }
     renderTopo() {
         // 节点数大于1000时，执行补间动画
-        if (this.perfInfo.nodeCounts > 1000) {
+        if (this.perfInfo.nodeCounts >= 1000) {
             let now = Date.now();
             let stepTime = now - this.perfInfo.prevTickTime;
             if (stepTime <= this.perfInfo.intervalTime && this.currentPositionStatus) {
@@ -481,55 +615,17 @@ class D3ForceGraph {
             this.currentPositionStatus = this.targetPositionStatus;
             this.updatePosition(this.currentPositionStatus);
             this.updateCirclePosition(this.currentPositionStatus);
-            this.renderArrow();
+            this.updateArrowPosition(this.currentPositionStatus);
+            this.updateSpeedUnitPosition(this.currentPositionStatus);
         }
-    }
-    renderArrow() {
-        this.arrows.geometry = new THREE.BufferGeometry();
-        this.arrows.positions = new Float32Array(this.perfInfo.linkCounts * 3);
-        this.arrows.rotates = new Float32Array(this.perfInfo.linkCounts);
-        this.arrows.material = new THREE.ShaderMaterial({
-            transparent: true,
-            uniforms: {
-                map: { value: textureLoader.load(textureMap['arrow'.toUpperCase()]) },
-                size: { value: this.config.nodeSize * 0.75 * 320 },
-                color: { value: new THREE.Vector3(...this.config.themeColor) }
-            },
-            vertexShader: arrowsVS(),
-            fragmentShader: arrowsFS()
-        });
-        let vec = new v3.Vector3(0, 0, 0);
-        let up = new v3.Vector3(1, 0, 0);
-        let offsetDistance = 0.385 * this.config.nodeSize;
-        this.processedData.links.forEach((e, i) => {
-            // 计算箭头的旋转方向与偏移位置
-            let vecX = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - this.currentPositionStatus[this.processedData.nodeInfoMap[e.source].index * 2];
-            let vecY = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2 + 1] - this.currentPositionStatus[this.processedData.nodeInfoMap[e.source].index * 2 + 1];
-            vec.x = vecX;
-            vec.y = vecY;
-            let angle = v3.Vector3.getAngle(vec, up);
-            let vecNorm = v3.Vector3.getNorm(vec);
-            let offsetX = vecX * offsetDistance / vecNorm;
-            let offsetY = vecY * offsetDistance / vecNorm;
-            if (vecY > 0) {
-                angle = 2 * Math.PI - angle;
-            }
-            this.arrows.positions[i * 3] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2] - offsetX;
-            this.arrows.positions[i * 3 + 1] = this.currentPositionStatus[this.processedData.nodeInfoMap[e.target].index * 2 + 1] - offsetY;
-            this.arrows.positions[i * 3 + 2] = -0.0007;
-            this.arrows.rotates[i] = angle;
-        });
-        this.arrows.geometry.setAttribute('position', new THREE.BufferAttribute(this.arrows.positions, 3));
-        this.arrows.geometry.setAttribute('rotate', new THREE.BufferAttribute(this.arrows.rotates, 1));
-        this.arrows.geometry.computeBoundingSphere();
-        this.arrows.mesh = new THREE.Points(this.arrows.geometry, this.arrows.material);
-        this.arrows.mesh.name = 'arrows';
-        this.scene.add(this.arrows.mesh);
     }
     // 更新节点与线的位置
     updatePosition(nodesPosition) {
         Object.keys(this.nodes).forEach((name) => {
             this.updateNodePosition(name, nodesPosition);
+        });
+        Object.keys(this.eventNodes).forEach((name) => {
+            this.updateEventNodePosition(name, nodesPosition);
         });
         Object.keys(this.lines).forEach((name) => {
             this.updateLinePosition(name, nodesPosition);
@@ -542,8 +638,17 @@ class D3ForceGraph {
             this.nodes[name].positions[i * 3 + 1] = nodesPosition[nodeConfig.indexArr[i] * 2 + 1];
         }
         this.nodes[name].geometry.attributes.position = new THREE.BufferAttribute(this.nodes[name].positions, 3);
-        this.nodes[name].geometry.attributes.position.needsUpdate = true;
         this.nodes[name].geometry.computeBoundingSphere();
+    }
+    updateEventNodePosition(name, nodesPosition) {
+        let nodeConfig = this.eventNodes[name].config;
+        let offset = (this.config.nodeSize + this.config.eventNodeSize) / (2 * 3.5);
+        for (let i = 0; i < nodeConfig.count; i++) {
+            this.eventNodes[name].positions[i * 3] = nodesPosition[nodeConfig.indexArr[i] * 2] + offset;
+            this.eventNodes[name].positions[i * 3 + 1] = nodesPosition[nodeConfig.indexArr[i] * 2 + 1] + offset;
+        }
+        this.eventNodes[name].geometry.attributes.position = new THREE.BufferAttribute(this.eventNodes[name].positions, 3);
+        this.eventNodes[name].geometry.computeBoundingSphere();
     }
     updateLinePosition(name, nodesPosition) {
         let lineConfig = this.lines[name].config;
@@ -557,20 +662,77 @@ class D3ForceGraph {
         this.lines[name].mesh.computeLineDistances();
     }
     updateCirclePosition(nodesPosition) {
-        let j = 0;
-        Object.keys(this.lines).forEach(name => {
-            if (name === 'createOn')
-                return;
-            let config = this.lines[name].config;
-            for (let i = 0; i < config.count; i++) {
-                this.circles.positions[j * 3] = (nodesPosition[config.indexArr[i * 2] * 2] + nodesPosition[config.indexArr[i * 2 + 1] * 2]) / 2;
-                this.circles.positions[j * 3 + 1] = (nodesPosition[config.indexArr[i * 2] * 2 + 1] + nodesPosition[config.indexArr[i * 2 + 1] * 2 + 1]) / 2;
-                j++;
-            }
-        });
-        this.circles.geometry.attributes.positions = new THREE.BufferAttribute(this.circles.positions, 3);
-        this.circles.geometry.attributes.positions.needsUpdate = true;
+        this.prepareCircleMesh();
+        for (let i = 0; i < this.perfInfo.tracingToLinkCounts; i++) {
+            this.circles.positions[i * 3] =
+                (nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2] +
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2]) / 2;
+            this.circles.positions[i * 3 + 1] =
+                (nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2 + 1] +
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2 + 1]) / 2;
+        }
+        this.circles.geometry.attributes.position = new THREE.BufferAttribute(this.circles.positions, 3);
         this.circles.geometry.computeBoundingSphere();
+    }
+    updateSpeedUnitPosition(nodesPosition) {
+        this.prepareSpeedUnitMesh();
+        let vec = new v3.Vector3(0, 0, 0);
+        let up = new v3.Vector3(1, 0, 0);
+        let offsetDistance = 0.1 * (1 + 1 / 3) * this.config.nodeSize;
+        for (let i = 0; i < this.perfInfo.tracingToLinkCounts; i++) {
+            // 计算箭头的旋转方向与偏移位置
+            let vecX = nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2] -
+                nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2];
+            let vecY = nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2 + 1] -
+                nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2 + 1];
+            vec.x = vecX;
+            vec.y = vecY;
+            let angle = v3.Vector3.getAngle(vec, up);
+            let vecNorm = v3.Vector3.getNorm(vec);
+            let offsetX = vecX * offsetDistance / vecNorm;
+            let offsetY = vecY * offsetDistance / vecNorm;
+            if (vecY < 0) {
+                angle = 2 * Math.PI - angle;
+            }
+            this.speedUnits.positions[i * 3] =
+                (nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2] +
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2]) / 2 - offsetY;
+            this.speedUnits.positions[i * 3 + 1] =
+                (nodesPosition[this.processedData.tracingToLinkBuffer[i * 2] * 2 + 1] +
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 2 + 1] * 2 + 1]) / 2 + offsetX;
+            this.speedUnits.rotates[i] = angle;
+        }
+        this.speedUnits.geometry.attributes.position = new THREE.BufferAttribute(this.speedUnits.positions, 3);
+        this.speedUnits.geometry.attributes.rotates = new THREE.BufferAttribute(this.speedUnits.rotates, 1);
+        this.speedUnits.geometry.computeBoundingSphere();
+    }
+    updateArrowPosition(nodesPosition) {
+        this.prepareArrowMesh();
+        let vec = new v3.Vector3(0, 0, 0);
+        let up = new v3.Vector3(1, 0, 0);
+        let offsetDistance = 0.385 * this.config.nodeSize;
+        for (let i = 0; i < this.perfInfo.linkCounts; i++) {
+            // 计算箭头的旋转方向与偏移位置
+            let vecX = nodesPosition[this.processedData.linkBuffer[i * 2 + 1] * 2] -
+                nodesPosition[this.processedData.linkBuffer[i * 2] * 2];
+            let vecY = nodesPosition[this.processedData.linkBuffer[i * 2 + 1] * 2 + 1] -
+                nodesPosition[this.processedData.linkBuffer[i * 2] * 2 + 1];
+            vec.x = vecX;
+            vec.y = vecY;
+            let angle = v3.Vector3.getAngle(vec, up);
+            let vecNorm = v3.Vector3.getNorm(vec);
+            let offsetX = vecX * offsetDistance / vecNorm;
+            let offsetY = vecY * offsetDistance / vecNorm;
+            if (vecY > 0) {
+                angle = 2 * Math.PI - angle;
+            }
+            this.arrows.positions[i * 3] = nodesPosition[this.processedData.linkBuffer[i * 2 + 1] * 2] - offsetX;
+            this.arrows.positions[i * 3 + 1] = nodesPosition[this.processedData.linkBuffer[i * 2 + 1] * 2 + 1] - offsetY;
+            this.arrows.rotates[i] = angle;
+        }
+        this.arrows.geometry.attributes.position = new THREE.BufferAttribute(this.arrows.positions, 3);
+        this.arrows.geometry.attributes.rotates = new THREE.BufferAttribute(this.arrows.rotates, 1);
+        this.arrows.geometry.computeBoundingSphere();
     }
     // 响应鼠标在图表上移动时的交互，指到某个节点上进行高亮
     updateHighLight() {
@@ -603,7 +765,10 @@ class D3ForceGraph {
                         let name = obj.object.name.split('-')[1];
                         if (type === 'basePoints') {
                             let pointIndex = this.nodes[name].config.indexArr[obj.index];
-                            pointIndex === nodeIndex && this.hlNodes.push({ name: name, index: obj.index }) && this.prepareHlTextsMesh(id);
+                            pointIndex === nodeIndex && this.hlNodes.push({
+                                name: name,
+                                index: obj.index
+                            }) && this.prepareHlTextsMesh(id);
                         }
                         else {
                             let startNodeIndex = this.lines[name].config.indexArr[obj.faceIndex * 2];
@@ -612,7 +777,7 @@ class D3ForceGraph {
                             let endNode = this.processedData.nodeInfoMap[this.processedData.nodes[endNodeIndex].id];
                             let node = startNodeIndex === nodeIndex ? endNode : startNode;
                             this.hlLines.push({ name: name, faceIndex: obj.faceIndex });
-                            this.hlNodes.push({ name: node.image, index: obj.faceIndex });
+                            // this.hlNodes.push({ name: node.image, index: obj.faceIndex })
                         }
                     });
                     this.addHighLight();
@@ -715,25 +880,14 @@ class D3ForceGraph {
         });
     }
     prepareHlTextsMesh(sourceId) {
-        let canvasDom = document.createElement('canvas');
-        let context = canvasDom.getContext('2d');
-        canvasDom.width = 512;
-        canvasDom.height = 64;
-        context.clearRect(0, 0, canvasDom.width, canvasDom.height);
-        context.font = 'Bold 72px Arial';
-        context.textAlign = 'center';
-        context.fillStyle = 'rgb(255,255,255)';
         let text = sourceId.startsWith('null') ? 'null' : (this.processedData.nodeInfoMap[sourceId].name || sourceId);
-        context.fillText(text, canvasDom.width / 2, 50);
-        let fontTexture = new THREE.Texture(canvasDom);
-        fontTexture.needsUpdate = true;
         this.hlText.material = new THREE.MeshBasicMaterial({
-            map: fontTexture,
+            map: this.createTextTexture(text, 512, 64, 72),
             side: THREE.DoubleSide,
             alphaTest: 0.5
         });
         this.hlText.material.transparent = true;
-        this.hlText.mesh = new THREE.Mesh(new THREE.PlaneGeometry(canvasDom.width, canvasDom.height), this.hlText.material);
+        this.hlText.mesh = new THREE.Mesh(new THREE.PlaneGeometry(512, 64), this.hlText.material);
         this.hlText.mesh.scale.set(0.12, 0.12, 0.12);
         let fontMeshPosition = [
             this.currentPositionStatus[this.processedData.nodeInfoMap[sourceId].index * 2] + 25,
@@ -743,6 +897,20 @@ class D3ForceGraph {
         this.hlText.mesh.position.set(...fontMeshPosition);
         this.hlText.mesh.name = 'hlText';
         this.scene.add(this.hlText.mesh);
+    }
+    createTextTexture(text, width, height, fontSize) {
+        let canvas = document.createElement('canvas');
+        let ctx = canvas.getContext('2d');
+        canvas.width = width;
+        canvas.height = height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = `Bold ${fontSize}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgb(255,255,255)';
+        ctx.fillText(text, canvas.width / 2 + fontSize * text.length / 4, canvas.height / 2 + fontSize / 4);
+        let fontTexture = new THREE.Texture(canvas);
+        fontTexture.needsUpdate = true;
+        return fontTexture;
     }
     mouseMoveHandler(event) {
         this.mouseStatus.mouseOnChart = true;

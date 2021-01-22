@@ -41,13 +41,14 @@
     </div>
     <div id="container"></div>
     <script>
+      let graph = null;
       window.onload = () => {
         let $container = document.getElementById("container");
         let $nodeNum = document.getElementById("nodeNum");
         let $linkNum = document.getElementById("linkNum");
         let nodeType = ["APPLICATION", "POD", "PROCESS", "WORKLOAD", "NODE", "MIDDLEWARE"];
+        let middleWareNodeType = ["cache", "database", "mq"];
         let lineType = ["createOn", "tracingTo"];
-        let graph = null;
         changeNodeNum();
         $nodeNum.addEventListener("change", changeNodeNum);
 
@@ -60,10 +61,14 @@
           $linkNum.innerText = nodeNum / 2;
 
           for (let i = 0; i < nodeNum; i++) {
-            testData.nodes.push({
+            let node = {
               id: "node" + i,
               image: nodeType[Math.floor(Math.random() * nodeType.length)],
-            });
+              event: Math.floor(Math.random() * 30)
+            }
+            if(node.image === 'MIDDLEWARE')
+              node.middleWareType = middleWareNodeType[Math.floor(Math.random() * middleWareNodeType.length)]
+            testData.nodes.push(node);
           }
 
           for (let i = 0; i < nodeNum / 2; i++) {

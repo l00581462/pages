@@ -7,6 +7,8 @@ interface GraphData {
         id: string;
         name?: string;
         image?: string;
+        middleWareType: string;
+        event?: number;
     }>;
     links: Array<{
         source: string;
@@ -26,6 +28,7 @@ interface GraphBaseConfig {
     dashScale?: number;
     gapSize?: number;
     nodeSize?: number;
+    eventNodeSize?: number;
     lineWidth?: number;
     backgroundColor?: RGB;
     highLightColor?: RGB;
@@ -50,6 +53,8 @@ interface ProcessedData extends D3ForceData {
             index: number;
             image?: string;
             name?: string;
+            event?: number;
+            middleWareType?: string;
             imageTexture?: THREE.Texture;
         };
     };
@@ -60,6 +65,7 @@ interface ProcessedData extends D3ForceData {
         };
     };
     linkBuffer: Int32Array;
+    tracingToLinkBuffer: Int32Array;
     statTable: Array<{
         source: string;
         count: number;
@@ -139,11 +145,15 @@ export declare class D3ForceGraph {
     nodes: {
         [key: string]: ItemMesh;
     };
+    eventNodes: {
+        [key: string]: ItemMesh;
+    };
     lines: {
         [key: string]: ItemMesh;
     };
     circles: ItemMesh;
     arrows: ItemMesh;
+    speedUnits: ItemMesh;
     hlNodes: Array<{
         name: string;
         index: number;
@@ -164,11 +174,16 @@ export declare class D3ForceGraph {
      */
     preProcessData(): ProcessedData;
     getLineWidth(speed: number): number;
+    getEventType(event: number): string;
+    getNodeType(type: string, middleWareType: string): string;
     prepareScene(): void;
     prepareBasicMesh(): void;
     prepareNodeMesh(name: string, nodeConfig: NodeConfig): void;
+    prepareEventNodeMesh(name: string, nodeConfig: NodeConfig): void;
     prepareLineMesh(name: string, linkConfig: LineConfig): void;
     prepareCircleMesh(): void;
+    prepareArrowMesh(): void;
+    prepareSpeedUnitMesh(): void;
     initWorker(): void;
     start(): void;
     installControls(): void;
@@ -178,11 +193,13 @@ export declare class D3ForceGraph {
     renderTopo(): void;
     renderLineAnimation(): void;
     checkFinalStatus(): void;
-    renderArrow(): void;
     updatePosition(nodesPosition: Float32Array): void;
     updateNodePosition(name: string, nodesPosition: Float32Array): void;
+    updateEventNodePosition(name: string, nodesPosition: Float32Array): void;
     updateLinePosition(name: string, nodesPosition: Float32Array): void;
     updateCirclePosition(nodesPosition: Float32Array): void;
+    updateSpeedUnitPosition(nodesPosition: Float32Array): void;
+    updateArrowPosition(nodesPosition: Float32Array): void;
     updateHighLight(): void;
     getAllVisibleNodes(): Array<VisibleNode>;
     getViewPortRect(): ViewportRect;
@@ -192,6 +209,7 @@ export declare class D3ForceGraph {
     highlightNodes(isHighlight: boolean): void;
     highlightLines(isHighlight: boolean): void;
     prepareHlTextsMesh(sourceId: string): void;
+    createTextTexture(text: string, width: number, height: number, fontSize: number): THREE.Texture;
     mouseMoveHandler(event: MouseEvent): void;
     mouseOutHandler(): void;
     mouseMoveHandlerBinded: any;
