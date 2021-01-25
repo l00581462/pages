@@ -78,10 +78,11 @@
               lineType: lineType[Math.floor(Math.random() * lineType.length)],
             };
             if (line.lineType === lineType[1]) {
-              line.speed = Math.random() * 10000;
+              line.speed = Math.floor(Math.random() * 1000) + 1;
             }
             testData.links.push(line);
           }
+          console.log(testData)
           if (graph) {
             graph.destroy();
           }
