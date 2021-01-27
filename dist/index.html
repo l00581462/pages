@@ -31,10 +31,10 @@
           for (let i = 0; i < nodeNum; i++) {
             let node = {
               id: "node" + i,
-              image: nodeType[Math.floor(Math.random() * nodeType.length)],
+              type: nodeType[Math.floor(Math.random() * nodeType.length)],
               event: Math.floor(Math.random() * 30)
             }
-            if(node.image === 'MIDDLEWARE')
+            if(node.type === 'MIDDLEWARE')
               node.middleWareType = middleWareNodeType[Math.floor(Math.random() * middleWareNodeType.length)]
             testData.nodes.push(node);
           }

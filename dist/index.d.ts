@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import mitt from 'mitt';
 import './index.css';
+declare type RGBA = [number, number, number, number];
 declare type RGB = [number, number, number];
 interface D3Link {
     source: string;
@@ -8,8 +9,9 @@ interface D3Link {
 }
 interface Node {
     id: string;
+    type: string;
     index?: number;
-    image?: string;
+    faceIndex?: number;
     name?: string;
     event?: number;
     middleWareType?: string;
@@ -27,8 +29,8 @@ interface GraphData {
 interface GraphBaseConfig {
     width: number;
     height: number;
-    themeColor?: RGB;
-    lineColor?: RGB;
+    themeColor?: RGBA;
+    lineColor?: RGBA;
     dashSize?: number;
     dashScale?: number;
     gapSize?: number;
@@ -36,7 +38,8 @@ interface GraphBaseConfig {
     eventNodeSize?: number;
     lineWidth?: number;
     backgroundColor?: RGB;
-    highLightColor?: RGB;
+    highlightColor?: RGBA;
+    nodeHighlightColor?: RGBA;
     showStatTable?: boolean;
     zoomNear?: number;
     zoomFar?: number;
@@ -124,7 +127,6 @@ export declare class D3ForceGraph {
     highlighted: string;
     throttleTimer: number;
     events: mitt.Emitter;
-    lockHighlightToken: false;
     scene: THREE.Scene;
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
@@ -146,17 +148,15 @@ export declare class D3ForceGraph {
     speedUnits: ItemMesh;
     hlNodes: Array<{
         name: string;
-        index: number;
+        faceIndex: number;
     }>;
     hlLines: Array<{
         name: string;
         faceIndex: number;
     }>;
-    hlCircles: Array<{
-        name: string;
-        index: number;
-    }>;
-    hlText: Mesh;
+    hlCircles: Array<number>;
+    hlArrows: Array<number>;
+    hlTexts: Array<Mesh>;
     constructor(dom: HTMLElement, data: GraphData, graphBaseConfig?: GraphBaseConfig);
     init(): void;
     prepareScene(): void;
@@ -169,7 +169,13 @@ export declare class D3ForceGraph {
      */
     preProcessData(): void;
     prepareNodesData(node: Node, index: number): void;
-    prepareLinksData(link: Link, sourceIndex: number, targetIndex: number, tracingToLinkBuffer: Array<number>): void;
+    prepareLinksData(params: {
+        link: Link;
+        sourceIndex: number;
+        targetIndex: number;
+        linkIndex: number;
+        tracingToLinkBuffer: Array<number>;
+    }): void;
     prepareSpeedData(link: Link, sourceIndex: number, targetIndex: number): void;
     prepareBasicMesh(): void;
     prepareNodeMesh(): void;
@@ -197,15 +203,16 @@ export declare class D3ForceGraph {
     renderLineAnimation(): void;
     checkFinalStatus(): void;
     updateHighLight(): void;
-    getAllVisibleNodes(): Array<VisibleNode>;
-    getViewPortRect(): ViewportRect;
-    highlight(id: string): void;
+    highlightNodeType(name: string, index: number): void;
+    highlightLineType(name: string, index: number): void;
+    highlightCircleType(index: number): void;
     unhighlight(): void;
     addHighLight(): void;
     highlightNodes(isHighlight: boolean): void;
     highlightLines(isHighlight: boolean): void;
+    highlightArrows(isHighlight: boolean): void;
     highlightCircles(isHighlight: boolean): void;
-    prepareHlTextsMesh(sourceId: string): void;
+    addHlTextsMesh(): void;
     mouseMoveHandler(event: MouseEvent): void;
     mouseOutHandler(): void;
     mouseMoveHandlerBinded: any;
@@ -226,5 +233,7 @@ export declare class D3ForceGraph {
     getDistance(nodesCount: number): number;
     getStrength(nodesCount: number): number;
     getCol(nodesCount: number): number;
+    getAllVisibleNodes(): Array<VisibleNode>;
+    getViewPortRect(): ViewportRect;
 }
 export {};
