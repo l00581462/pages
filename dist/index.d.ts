@@ -1,26 +1,31 @@
 import * as THREE from 'three';
 import mitt from 'mitt';
 import './index.css';
-declare type RGBA = [number, number, number, number];
-declare type RGB = [number, number, number];
+interface MaterialSegment {
+    name: string;
+    faceIndex: number;
+}
 interface D3Link {
     source: string;
     target: string;
 }
 interface Node {
     id: string;
-    type: string;
+    name: string;
+    label: string;
+    eventCount?: number;
+    middleWareType?: string;
     index?: number;
     faceIndex?: number;
-    name?: string;
-    event?: number;
-    middleWareType?: string;
 }
 interface Link {
+    id: string;
+    name: string;
+    label: string;
     source: string;
     target: string;
-    lineType?: string;
-    speed?: number;
+    callPerMinute?: number;
+    index?: number;
 }
 interface GraphData {
     nodes: Array<Node>;
@@ -29,18 +34,14 @@ interface GraphData {
 interface GraphBaseConfig {
     width: number;
     height: number;
-    themeColor?: RGBA;
-    lineColor?: RGBA;
     dashSize?: number;
     dashScale?: number;
     gapSize?: number;
     nodeSize?: number;
     eventNodeSize?: number;
     lineWidth?: number;
-    backgroundColor?: RGB;
-    highlightColor?: RGBA;
-    nodeHighlightColor?: RGBA;
     showStatTable?: boolean;
+    zoomScale?: number;
     zoomNear?: number;
     zoomFar?: number;
     debug?: boolean;
@@ -57,6 +58,13 @@ interface ProcessedData extends D3ForceData {
     };
     linkInfoMap: {
         [key: string]: Link;
+    };
+    nodeTypeRelatedData: {
+        [key: string]: {
+            eventNodes: Array<MaterialSegment>;
+            callPerMinuteNums: Array<MaterialSegment>;
+            lines: Array<MaterialSegment>;
+        };
     };
     linkBuffer: Int32Array;
     tracingToLinkBuffer: Int32Array;
@@ -98,7 +106,10 @@ interface GraphPerfInfo {
 }
 interface MouseStatus {
     mouseOnChart: boolean;
+    mouseDownStatus: boolean;
+    mouseDownNodeStatus: boolean;
     mousePosition: THREE.Vector2;
+    mouseWorldPosition: THREE.Vector2;
 }
 interface ViewportRect {
     left: number;
@@ -140,20 +151,14 @@ export declare class D3ForceGraph {
     lines: {
         [key: string]: ItemMesh;
     };
-    speed: {
+    callPerMinuteNums: {
         [key: string]: ItemMesh;
     };
     circles: ItemMesh;
     arrows: ItemMesh;
-    speedUnits: ItemMesh;
-    hlNodes: Array<{
-        name: string;
-        faceIndex: number;
-    }>;
-    hlLines: Array<{
-        name: string;
-        faceIndex: number;
-    }>;
+    callPerMinuteUnits: ItemMesh;
+    hlNodes: Array<MaterialSegment>;
+    hlLines: Array<MaterialSegment>;
     hlCircles: Array<number>;
     hlArrows: Array<number>;
     hlTexts: Array<Mesh>;
@@ -169,30 +174,24 @@ export declare class D3ForceGraph {
      */
     preProcessData(): void;
     prepareNodesData(node: Node, index: number): void;
-    prepareLinksData(params: {
-        link: Link;
-        sourceIndex: number;
-        targetIndex: number;
-        linkIndex: number;
-        tracingToLinkBuffer: Array<number>;
-    }): void;
-    prepareSpeedData(link: Link, sourceIndex: number, targetIndex: number): void;
+    prepareLinesData(link: Link, tracingToLinkBuffer: Array<number>): void;
+    prepareCallPerMinuteNumsData(link: Link): void;
     prepareBasicMesh(): void;
-    prepareNodeMesh(): void;
-    prepareEventNodeMesh(): void;
-    prepareLineMesh(): void;
-    prepareCircleMesh(): void;
-    prepareArrowMesh(): void;
-    prepareSpeedMesh(): void;
-    prepareSpeedUnitMesh(): void;
+    prepareNodesMesh(): void;
+    prepareEventNodesMesh(): void;
+    prepareLinesMesh(): void;
+    prepareCirclesMesh(): void;
+    prepareArrowsMesh(): void;
+    prepareCallPerMinuteNumsMesh(): void;
+    prepareCallPerMinuteUnitsMesh(): void;
     updatePosition(nodesPosition: Float32Array): void;
-    updateNodePosition(nodesPosition: Float32Array): void;
-    updateEventNodePosition(nodesPosition: Float32Array): void;
-    updateLinePosition(nodesPosition: Float32Array): void;
-    updateCirclePosition(nodesPosition: Float32Array): void;
-    updateSpeedPosition(nodesPosition: Float32Array): void;
-    updateSpeedUnitPosition(nodesPosition: Float32Array): void;
-    updateArrowPosition(nodesPosition: Float32Array): void;
+    updateNodesPosition(nodesPosition: Float32Array): void;
+    updateEventNodesPosition(nodesPosition: Float32Array): void;
+    updateLinesPosition(nodesPosition: Float32Array): void;
+    updateCirclesPosition(nodesPosition: Float32Array): void;
+    updateCallPerMinuteNumsPosition(nodesPosition: Float32Array): void;
+    updateCallPerMinuteUnitsPosition(nodesPosition: Float32Array): void;
+    updateArrowsPosition(nodesPosition: Float32Array): void;
     initWorker(): void;
     start(): void;
     installControls(): void;
@@ -207,28 +206,35 @@ export declare class D3ForceGraph {
     highlightLineType(name: string, index: number): void;
     highlightCircleType(index: number): void;
     unhighlight(): void;
+    resetAllMeshColor(): void;
+    prepareDarkenData(typeArr: Array<string>): void;
     addHighLight(): void;
     highlightNodes(isHighlight: boolean): void;
     highlightLines(isHighlight: boolean): void;
     highlightArrows(isHighlight: boolean): void;
     highlightCircles(isHighlight: boolean): void;
     addHlTextsMesh(): void;
+    addLineTextMesh(line: Link): void;
+    refreshMouseStatus(event: MouseEvent): void;
     mouseMoveHandler(event: MouseEvent): void;
     mouseOutHandler(): void;
+    mouseDownHandler(event: MouseEvent): void;
+    mouseUpHandler(): void;
+    mouseWheelHandler(event: MouseWheelEvent): void;
     mouseMoveHandlerBinded: any;
-    mouseOutHandlerBinded: any;
+    mouseWheelHandlerBinded: any;
+    mouseDownHandlerBinded: any;
+    mouseUpHandlerBinded: any;
     chartMouseEnterHandler(): void;
     chartMouseLeaveHandler(): void;
-    chartMouseEnterHandlerBinded: any;
-    chartMouseLeaveHandlerBinded: any;
     bindEvent(): void;
     unbindEvent(): void;
     destroy(): void;
     resize(width: number, height: number): void;
     createTextTexture(text: string, width: number, height: number, fontSize: number): THREE.Texture;
     getLineWidth(speed: number): number;
-    getEventType(event: number): string;
-    getNodeType(type: string, middleWareType: string): string;
+    getEventLabel(event: number): string;
+    getNodeLabel(type: string, middleWareType: string): string;
     getPositionZ(nodesCount: number): number;
     getDistance(nodesCount: number): number;
     getStrength(nodesCount: number): number;
