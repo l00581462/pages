@@ -28,11 +28,15 @@ const DARK_LINE_COLOR = BACKGROUND_COLOR.map((val, i) => val * (1 - DARK_OPACITY
 const DARK_HL_COLOR = BACKGROUND_COLOR.map((val, i) => val * (1 - DARK_OPACITY) + HL_COLOR[i] * DARK_OPACITY);
 const textureLoader = new THREE.TextureLoader();
 const textureMap = new pngLoader_1.PngLoader().result;
+const NODE_SIZE = 15000;
 const GRAPH_BASE_CONFIG = {
     width: 400,
     height: 400,
-    nodeSize: 50,
-    eventNodeSize: 20,
+    nodeSize: NODE_SIZE,
+    circleSize: NODE_SIZE * 0.33,
+    arrowSize: NODE_SIZE * 0.8,
+    eventNodeSize: NODE_SIZE * 0.5,
+    textSize: NODE_SIZE * 0.25,
     dashSize: 5,
     gapSize: 3,
     dashScale: 1,
@@ -489,7 +493,7 @@ class D3ForceGraph {
             depthTest: false,
             uniforms: {
                 map: { value: textureLoader.load(textureMap['circle'.toUpperCase()]) },
-                size: { value: this.config.nodeSize * 0.25 }
+                size: { value: this.config.circleSize }
             },
             vertexShader: nodesVS(),
             fragmentShader: nodesFS()
@@ -520,7 +524,7 @@ class D3ForceGraph {
             transparent: true,
             uniforms: {
                 map: { value: textureLoader.load(textureMap['arrow'.toUpperCase()]) },
-                size: { value: this.config.nodeSize * 0.75 }
+                size: { value: this.config.arrowSize }
             },
             vertexShader: arrowsVS(),
             fragmentShader: arrowsFS()
@@ -556,7 +560,7 @@ class D3ForceGraph {
                 depthTest: false,
                 uniforms: {
                     map: { value: config.map },
-                    size: { value: this.config.nodeSize * 0.25 }
+                    size: { value: this.config.textSize }
                 },
                 vertexShader: textVS(),
                 fragmentShader: textFS()
@@ -590,7 +594,7 @@ class D3ForceGraph {
             transparent: true,
             uniforms: {
                 map: { value: this.createTextTexture('r/min', 200, 200, 40) },
-                size: { value: this.config.nodeSize * 1.1 }
+                size: { value: this.config.textSize * 4 }
             },
             vertexShader: textVS(),
             fragmentShader: textFS()
@@ -616,7 +620,6 @@ class D3ForceGraph {
     // 更新节点与线的位置
     updatePosition(nodesPosition) {
         this.updateNodesPosition(nodesPosition);
-        this.updateEventNodesPosition(nodesPosition);
         this.updateLinesPosition(nodesPosition);
     }
     updateNodesPosition(nodesPosition) {
@@ -631,9 +634,10 @@ class D3ForceGraph {
         });
     }
     updateEventNodesPosition(nodesPosition) {
+        let scale = 1 + this.config.eventNodeSize / this.config.nodeSize;
+        let offset = this.getOffset(this.config.nodeSize, this.config.eventNodeSize) / scale;
         Object.keys(this.eventNodes).forEach((name) => {
             let nodeConfig = this.eventNodes[name].config;
-            let offset = (this.config.nodeSize + this.config.eventNodeSize) / (2 * 3.5);
             for (let i = 0; i < nodeConfig.count; i++) {
                 this.eventNodes[name].positions[i * 3] = nodesPosition[nodeConfig.indexArr[i] * 2] + offset;
                 this.eventNodes[name].positions[i * 3 + 1] = nodesPosition[nodeConfig.indexArr[i] * 2 + 1] + offset;
@@ -673,7 +677,8 @@ class D3ForceGraph {
         this.prepareCallPerMinuteNumsMesh();
         let vec = new v3.Vector3(0, 0, 0);
         let up = new v3.Vector3(1, 0, 0);
-        let offsetDistance = 0.1 * (1 + 1 / 3) * this.config.nodeSize;
+        let vOffsetDistance = this.getOffset(this.config.circleSize, this.config.textSize);
+        let pOffsetDistance = this.getOffset(this.config.textSize, this.config.textSize) / 2;
         Object.keys(this.callPerMinuteNums).forEach(name => {
             let item = this.callPerMinuteNums[name];
             let config = item.config;
@@ -688,18 +693,19 @@ class D3ForceGraph {
                 vec.y = vecY;
                 let angle = v3.Vector3.getAngle(vec, up);
                 let vecNorm = v3.Vector3.getNorm(vec);
-                let offsetX = vecX * offsetDistance / vecNorm;
-                let offsetY = vecY * offsetDistance / vecNorm;
+                let cos = vecX / vecNorm;
+                let sin = vecY / vecNorm;
                 if (vecY < 0) {
                     angle = 2 * Math.PI - angle;
                 }
                 item.positions[i * 3] =
                     (nodesPosition[config.indexArr[i * 3] * 2] +
-                        nodesPosition[config.indexArr[i * 3 + 1] * 2]) / 2 - 0.8 * offsetY - index * offsetX * 0.4;
+                        nodesPosition[config.indexArr[i * 3 + 1] * 2]) / 2
+                        - vOffsetDistance * sin - index * pOffsetDistance * cos;
                 item.positions[i * 3 + 1] =
                     (nodesPosition[config.indexArr[i * 3] * 2 + 1] +
-                        nodesPosition[config.indexArr[i * 3 + 1] * 2 + 1]) / 2 + 0.8 * offsetX - index * offsetY * 0.4;
-                item.positions[i * 3 + 2] = -0.002;
+                        nodesPosition[config.indexArr[i * 3 + 1] * 2 + 1]) / 2 +
+                        vOffsetDistance * cos - index * pOffsetDistance * sin;
                 item.rotates[i] = angle;
                 item.geometry.attributes.position = new THREE.BufferAttribute(item.positions, 3);
                 item.geometry.attributes.rotates = new THREE.BufferAttribute(item.rotates, 1);
@@ -712,7 +718,7 @@ class D3ForceGraph {
         let item = this.callPerMinuteUnits;
         let vec = new v3.Vector3(0, 0, 0);
         let up = new v3.Vector3(1, 0, 0);
-        let offsetDistance = 0.1 * (1 + 1 / 3) * this.config.nodeSize;
+        let offsetDistance = this.getOffset(this.config.circleSize, this.config.textSize);
         for (let i = 0; i < this.perfInfo.tracingToLinkCounts; i++) {
             // 计算箭头的旋转方向与偏移位置
             let vecX = nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2] -
@@ -730,10 +736,10 @@ class D3ForceGraph {
             }
             item.positions[i * 3] =
                 (nodesPosition[this.processedData.tracingToLinkBuffer[i * 5] * 2] +
-                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2]) / 2 - (offsetY - offsetX) * 0.8;
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2]) / 2 - (offsetY - offsetX);
             item.positions[i * 3 + 1] =
                 (nodesPosition[this.processedData.tracingToLinkBuffer[i * 5] * 2 + 1] +
-                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2 + 1]) / 2 + (offsetX + offsetY) * 0.8;
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2 + 1]) / 2 + (offsetX + offsetY);
             item.rotates[i] = angle;
         }
         item.geometry.attributes.position = new THREE.BufferAttribute(item.positions, 3);
@@ -744,16 +750,12 @@ class D3ForceGraph {
         this.prepareArrowsMesh();
         let vec = new v3.Vector3(0, 0, 0);
         let up = new v3.Vector3(1, 0, 0);
-        let offsetDistance = 0.385 * this.config.nodeSize;
-        // let distanceVector = this.camera.position.sub(new THREE.Vector3())
-        // console.log(this.config.nodeSize * 320.0 / sqrt(dot(distanceVector, distanceVector)))
+        let offsetDistance = this.getOffset(this.config.nodeSize, this.config.arrowSize);
         let linkBuffer = this.processedData.linkBuffer;
         for (let i = 0; i < this.perfInfo.linkCounts; i++) {
             // 计算箭头的旋转方向与偏移位置
-            let vecX = nodesPosition[linkBuffer[i * 2 + 1] * 2] -
-                nodesPosition[linkBuffer[i * 2] * 2];
-            let vecY = nodesPosition[linkBuffer[i * 2 + 1] * 2 + 1] -
-                nodesPosition[linkBuffer[i * 2] * 2 + 1];
+            let vecX = nodesPosition[linkBuffer[i * 2 + 1] * 2] - nodesPosition[linkBuffer[i * 2] * 2];
+            let vecY = nodesPosition[linkBuffer[i * 2 + 1] * 2 + 1] - nodesPosition[linkBuffer[i * 2] * 2 + 1];
             vec.x = vecX;
             vec.y = vecY;
             let angle = v3.Vector3.getAngle(vec, up);
@@ -900,6 +902,7 @@ class D3ForceGraph {
         if (!this.perfInfo.layouting && this.currentPositionStatus && (this.currentPositionStatus[0] !== this.targetPositionStatus[0])) {
             this.currentPositionStatus = this.targetPositionStatus;
             this.updatePosition(this.currentPositionStatus);
+            this.updateEventNodesPosition(this.currentPositionStatus);
             this.updateCirclesPosition(this.currentPositionStatus);
             this.updateArrowsPosition(this.currentPositionStatus);
             this.updateCallPerMinuteNumsPosition(this.currentPositionStatus);
@@ -1375,6 +1378,25 @@ class D3ForceGraph {
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
         this.renderer.render(this.scene, this.camera);
+    }
+    getOffset(size1, size2) {
+        let distanceVector = this.camera.position.clone().sub(new THREE.Vector3(0, 0, 0));
+        let nodeSize = size1 / distanceVector.length();
+        let eventNodeSize = size2 / distanceVector.length();
+        let distance = (nodeSize + eventNodeSize) / this.config.width;
+        let nameArr = Object.keys(this.nodes);
+        if (nameArr.length) {
+            let modelViewMatrix = this.nodes[nameArr[0]].mesh.modelViewMatrix;
+            let vector = new THREE.Vector4(0, 0, 0, 1)
+                .applyMatrix4(modelViewMatrix.clone())
+                .applyMatrix4(this.camera.projectionMatrix.clone());
+            let mouseVector = new THREE.Vector4(distance * vector.w, 0, vector.z, 1);
+            let topoMouse = mouseVector
+                .applyMatrix4(this.camera.projectionMatrix.clone().invert())
+                .applyMatrix4(modelViewMatrix.clone().invert());
+            return topoMouse.x;
+        }
+        return 0;
     }
     createTextTexture(text, width, height, fontSize) {
         let canvas = document.createElement('canvas');

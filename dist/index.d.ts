@@ -34,11 +34,15 @@ interface GraphData {
 interface GraphBaseConfig {
     width: number;
     height: number;
+    weight?: number;
     dashSize?: number;
     dashScale?: number;
     gapSize?: number;
     nodeSize?: number;
     eventNodeSize?: number;
+    arrowSize?: number;
+    circleSize?: number;
+    textSize?: number;
     lineWidth?: number;
     showStatTable?: boolean;
     zoomScale?: number;
@@ -231,6 +235,7 @@ export declare class D3ForceGraph {
     unbindEvent(): void;
     destroy(): void;
     resize(width: number, height: number): void;
+    getOffset(size1: number, size2: number): number;
     createTextTexture(text: string, width: number, height: number, fontSize: number): THREE.Texture;
     getLineWidth(speed: number): number;
     getEventLabel(event: number): string;
