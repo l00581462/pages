@@ -918,11 +918,9 @@ class D3ForceGraph {
         let formatArr = [];
         for (let i = 0; i < typeArr.length; i++) {
             if (typeArr[i].toUpperCase() === 'MIDDLEWARE') {
-                ['mq', 'database', 'cache'].forEach(val => formatArr.push(`${val}_typeArr[i]`.toUpperCase()));
+                ['mq', 'database', 'cache'].forEach(val => formatArr.push(`${typeArr[i]}_${val}`.toUpperCase()));
             }
-            else {
-                formatArr.push(typeArr[i].toUpperCase());
-            }
+            formatArr.push(typeArr[i].toUpperCase());
         }
         this.darkenNodes(formatArr);
     }
