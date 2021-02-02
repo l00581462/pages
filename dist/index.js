@@ -44,7 +44,7 @@ const GRAPH_BASE_CONFIG = {
     showStatTable: true,
     zoomScale: 15,
     zoomNear: 75,
-    zoomFar: 17000,
+    zoomFar: 30000,
     debug: false
 };
 const GRAPH_DEFAULT_PERF_INFO = {
@@ -95,6 +95,7 @@ class D3ForceGraph {
             positions: null,
             colors: null
         };
+        this.lineInfoText = null;
         this.hlNodes = [];
         this.hlLines = [];
         this.hlCircles = [];
@@ -137,13 +138,16 @@ class D3ForceGraph {
         this.renderer.setSize(this.config.width, this.config.height);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.$container.appendChild(this.renderer.domElement);
-        this.camera = new THREE.PerspectiveCamera(45, this.config.width / this.config.height, 40, 18000);
+        this.camera = new THREE.PerspectiveCamera(45, this.config.width / this.config.height, this.config.zoomNear, this.config.zoomFar);
         this.camera.position.set(0, 0, this.getPositionZ(this.processedData.nodes.length));
         this.camera.up = new THREE.Vector3(0, 0, 1);
         this.camera.updateProjectionMatrix();
         this.renderer.render(this.scene, this.camera);
         this.containerRect = this.$container.getBoundingClientRect();
         this.$container.classList.add('d3-force-graph-container');
+        this.distanceVector = this.camera.position.clone().sub(new THREE.Vector3(0, 0, 0));
+        this.projectionMatrix = this.camera.projectionMatrix.clone();
+        this.modelViewMatrix = this.camera.matrixWorldInverse.clone().multiply(this.scene.matrixWorld);
     }
     /**
      * preProcessData
@@ -337,7 +341,7 @@ class D3ForceGraph {
             if (!this.callPerMinuteNums[num]) {
                 this.callPerMinuteNums[num] = {
                     config: {
-                        map: this.createTextTexture(num, 45, 45, 40),
+                        map: this.createTextTexture(num, 50, 50, 40),
                         count: 1,
                         indexArr: [sourceNodeIndex, targetNodeIndex, j]
                     },
@@ -592,6 +596,7 @@ class D3ForceGraph {
         item.colors = new Float32Array(this.perfInfo.tracingToLinkCounts * 4);
         item.material = new THREE.ShaderMaterial({
             transparent: true,
+            depthTest: false,
             uniforms: {
                 map: { value: this.createTextTexture('r/min', 200, 200, 40) },
                 size: { value: this.config.textSize * 4 }
@@ -620,6 +625,7 @@ class D3ForceGraph {
     // 更新节点与线的位置
     updatePosition(nodesPosition) {
         this.updateNodesPosition(nodesPosition);
+        this.updateEventNodesPosition(this.currentPositionStatus);
         this.updateLinesPosition(nodesPosition);
     }
     updateNodesPosition(nodesPosition) {
@@ -634,7 +640,7 @@ class D3ForceGraph {
         });
     }
     updateEventNodesPosition(nodesPosition) {
-        let scale = 1 + this.config.eventNodeSize / this.config.nodeSize;
+        let scale = (1 + this.config.eventNodeSize / this.config.nodeSize);
         let offset = this.getOffset(this.config.nodeSize, this.config.eventNodeSize) / scale;
         Object.keys(this.eventNodes).forEach((name) => {
             let nodeConfig = this.eventNodes[name].config;
@@ -736,10 +742,10 @@ class D3ForceGraph {
             }
             item.positions[i * 3] =
                 (nodesPosition[this.processedData.tracingToLinkBuffer[i * 5] * 2] +
-                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2]) / 2 - (offsetY - offsetX);
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2]) / 2 - offsetY;
             item.positions[i * 3 + 1] =
                 (nodesPosition[this.processedData.tracingToLinkBuffer[i * 5] * 2 + 1] +
-                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2 + 1]) / 2 + (offsetX + offsetY);
+                    nodesPosition[this.processedData.tracingToLinkBuffer[i * 5 + 1] * 2 + 1]) / 2 + offsetX;
             item.rotates[i] = angle;
         }
         item.geometry.attributes.position = new THREE.BufferAttribute(item.positions, 3);
@@ -750,7 +756,7 @@ class D3ForceGraph {
         this.prepareArrowsMesh();
         let vec = new v3.Vector3(0, 0, 0);
         let up = new v3.Vector3(1, 0, 0);
-        let offsetDistance = this.getOffset(this.config.nodeSize, this.config.arrowSize);
+        let offset = this.getOffset(this.config.nodeSize, this.config.arrowSize);
         let linkBuffer = this.processedData.linkBuffer;
         for (let i = 0; i < this.perfInfo.linkCounts; i++) {
             // 计算箭头的旋转方向与偏移位置
@@ -760,8 +766,8 @@ class D3ForceGraph {
             vec.y = vecY;
             let angle = v3.Vector3.getAngle(vec, up);
             let vecNorm = v3.Vector3.getNorm(vec);
-            let offsetX = vecX * offsetDistance / vecNorm;
-            let offsetY = vecY * offsetDistance / vecNorm;
+            let offsetX = vecX * offset / vecNorm;
+            let offsetY = vecY * offset / vecNorm;
             if (vecY > 0) {
                 angle = 2 * Math.PI - angle;
             }
@@ -889,26 +895,36 @@ class D3ForceGraph {
         }
     }
     renderLineAnimation() {
+        let scale = this.getPositionZ(2) / this.camera.position.z;
         Object.keys(this.lines).forEach((name) => {
             if (name === 'CreateOn')
                 return;
-            let scale = this.getPositionZ(2) / this.camera.position.z;
             let lineWidth = parseInt(name[name.length - 1], 10);
             this.lines[name].material.linewidth = lineWidth * scale;
-            this.lines[name].material.dashOffset -= 0.2;
+            this.lines[name].material.dashOffset -= 0.3;
         });
     }
     checkFinalStatus() {
         if (!this.perfInfo.layouting && this.currentPositionStatus && (this.currentPositionStatus[0] !== this.targetPositionStatus[0])) {
             this.currentPositionStatus = this.targetPositionStatus;
             this.updatePosition(this.currentPositionStatus);
-            this.updateEventNodesPosition(this.currentPositionStatus);
             this.updateCirclesPosition(this.currentPositionStatus);
             this.updateArrowsPosition(this.currentPositionStatus);
             this.updateCallPerMinuteNumsPosition(this.currentPositionStatus);
             this.updateCallPerMinuteUnitsPosition(this.currentPositionStatus);
-            this.prepareDarkenData(['APPLICATION']);
         }
+    }
+    filterNodes(typeArr) {
+        let formatArr = [];
+        for (let i = 0; i < typeArr.length; i++) {
+            if (typeArr[i].toUpperCase() === 'MIDDLEWARE') {
+                ['mq', 'database', 'cache'].forEach(val => formatArr.push(`${val}_typeArr[i]`.toUpperCase()));
+            }
+            else {
+                formatArr.push(typeArr[i].toUpperCase());
+            }
+        }
+        this.darkenNodes(formatArr);
     }
     // 响应鼠标在图表上移动时的交互，指到某个节点上进行高亮
     updateHighLight() {
@@ -917,7 +933,8 @@ class D3ForceGraph {
         ray.params.Points.threshold = 2;
         let intersects = ray.intersectObjects(this.scene.children).filter(e => !e.object.name.startsWith('hl'));
         if (intersects.length > 0) {
-            let target = intersects[0];
+            let object = intersects.filter(e => e.object.name.startsWith('basePoints'));
+            let target = object.length > 0 ? object[0] : intersects[0];
             if (!target.object)
                 return;
             let type = target.object.name.split('-')[0];
@@ -991,6 +1008,9 @@ class D3ForceGraph {
             this.hlLines.push({ name: name, faceIndex: index });
             this.hlArrows.push(arrowIndex);
             this.hlCircles.push(circleIndex);
+            let opacity = this.arrows.colors[arrowIndex * 4 + 3].toFixed(2) === DARK_OPACITY.toFixed(2)
+                ? DARK_OPACITY : 0.8;
+            this.addLineTextMesh(this.processedData.linkInfoMap[`${startNodeId}-${endNodeId}`], opacity);
             this.addHighLight();
             this.highlighted = id;
         }
@@ -1017,20 +1037,25 @@ class D3ForceGraph {
             this.hlLines.push({ name: name, faceIndex: lineIndex });
             this.hlArrows.push(arrowIndex);
             this.hlCircles.push(index);
-            this.addLineTextMesh(this.processedData.linkInfoMap[`${startNodeId}-${endNodeId}`]);
+            let opacity = this.arrows.colors[arrowIndex * 4 + 3].toFixed(2) === DARK_OPACITY.toFixed(2)
+                ? DARK_OPACITY : 0.8;
+            this.addLineTextMesh(this.processedData.linkInfoMap[`${startNodeId}-${endNodeId}`], opacity);
             this.addHighLight();
             this.highlighted = id;
         }
     }
     unhighlight() {
         let text = this.scene.getObjectByName('hlText');
+        let lineInfoText = this.scene.getObjectByName('lineInfoText');
         this.scene.remove(text);
+        this.scene.remove(lineInfoText);
         this.highlighted = null;
         this.$container.classList.remove('hl');
         this.highlightLines(false);
         this.highlightNodes(false);
         this.highlightArrows(false);
         this.highlightCircles(false);
+        this.lineInfoText = null;
         this.hlLines = [];
         this.hlNodes = [];
         this.hlCircles = [];
@@ -1051,7 +1076,7 @@ class D3ForceGraph {
         this.circles.colors = this.circles.colors.map((val, index) => index % 4 === 3 ? THEME_OPACITY : THEME_COLOR[index % 4]);
         this.arrows.colors = this.arrows.colors.map((val, index) => index % 4 === 3 ? THEME_OPACITY : THEME_COLOR[index % 4]);
     }
-    prepareDarkenData(typeArr) {
+    darkenNodes(typeArr) {
         this.resetAllMeshColor();
         Object.keys(this.nodes).forEach(name => {
             this.nodes[name].colors =
@@ -1060,16 +1085,11 @@ class D3ForceGraph {
         typeArr.forEach(name => {
             if (!this.nodes[name])
                 return;
-            let eventNodesMap = {};
-            let callPerMinuteNumsMap = {};
-            let linesMap = {};
             this.processedData.nodeTypeRelatedData[name].eventNodes.forEach((node) => {
                 this.eventNodes[node.name].colors[node.faceIndex * 4 + 3] = DARK_OPACITY;
-                eventNodesMap[node.name] = true;
             });
             this.processedData.nodeTypeRelatedData[name].callPerMinuteNums.forEach((segment) => {
                 this.callPerMinuteNums[segment.name].colors[segment.faceIndex * 4 + 3] = DARK_OPACITY;
-                callPerMinuteNumsMap[segment.name] = true;
             });
             this.processedData.nodeTypeRelatedData[name].lines.forEach((line) => {
                 let name = line.name;
@@ -1085,18 +1105,19 @@ class D3ForceGraph {
                 this.arrows.colors[indexArr[faceIndex * 4 + 2] * 4 + 3] = DARK_OPACITY;
                 this.circles.colors[indexArr[faceIndex * 4 + 3] * 4 + 3] = DARK_OPACITY;
                 this.callPerMinuteUnits.colors[indexArr[faceIndex * 4 + 3] * 4 + 3] = DARK_OPACITY;
-                linesMap[name] = true;
             });
-            Object.keys(eventNodesMap).forEach(name => {
-                this.eventNodes[name].geometry.attributes.color = new THREE.BufferAttribute(this.eventNodes[name].colors, 4);
-            });
-            Object.keys(callPerMinuteNumsMap).forEach(name => {
-                this.callPerMinuteNums[name].geometry.attributes.color = new THREE.BufferAttribute(this.callPerMinuteNums[name].colors, 4);
-            });
-            Object.keys(linesMap).forEach(name => {
-                this.lines[name].geometry.setColors(this.lines[name].colors);
-            });
+        });
+        Object.keys(this.nodes).forEach(name => {
             this.nodes[name].geometry.attributes.color = new THREE.BufferAttribute(this.nodes[name].colors, 4);
+        });
+        Object.keys(this.eventNodes).forEach(name => {
+            this.eventNodes[name].geometry.attributes.color = new THREE.BufferAttribute(this.eventNodes[name].colors, 4);
+        });
+        Object.keys(this.callPerMinuteNums).forEach(name => {
+            this.callPerMinuteNums[name].geometry.attributes.color = new THREE.BufferAttribute(this.callPerMinuteNums[name].colors, 4);
+        });
+        Object.keys(this.lines).forEach(name => {
+            this.lines[name].geometry.setColors(this.lines[name].colors);
         });
         this.arrows.geometry.attributes.color = new THREE.BufferAttribute(this.arrows.colors, 4);
         this.circles.geometry.attributes.color = new THREE.BufferAttribute(this.circles.colors, 4);
@@ -1192,17 +1213,17 @@ class D3ForceGraph {
             let text = this.processedData.nodes[nodeIndex].id;
             let hlText = { geometry: null, material: null, mesh: null };
             hlText.material = new THREE.MeshBasicMaterial({
-                map: this.createTextTexture(text, 512, 64, 72),
+                map: this.createTextTexture(text, 600, 72, 72),
                 transparent: true,
                 opacity: this.nodes[node.name].colors[node.faceIndex * 4 + 3],
                 side: THREE.DoubleSide
             });
-            hlText.mesh = new THREE.Mesh(new THREE.PlaneGeometry(512, 64), hlText.material);
-            hlText.mesh.scale.set(0.12, 0.12, 0.12);
+            let scale = 0.25;
+            hlText.mesh = new THREE.Mesh(new THREE.PlaneGeometry(600 * scale, 72 * scale), hlText.material);
             let fontMeshPosition = [
-                this.currentPositionStatus[nodeIndex * 2] + 25,
+                this.currentPositionStatus[nodeIndex * 2] + this.getOffset(this.config.nodeSize, 0) * 2,
                 this.currentPositionStatus[nodeIndex * 2 + 1],
-                0.02
+                0.001
             ];
             hlText.mesh.position.set(...fontMeshPosition);
             hlText.mesh.name = 'hlText';
@@ -1210,55 +1231,74 @@ class D3ForceGraph {
             this.hlTexts.push(hlText);
         });
     }
-    addLineTextMesh(line) {
+    addLineTextMesh(line, opacity) {
         let canvas = document.createElement('canvas');
         let ctx = canvas.getContext('2d');
+        let scale;
         if (line.label === 'TracingTo') {
-            canvas.width = 330;
-            canvas.height = 140;
+            canvas.width = 560;
+            canvas.height = 260;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'black';
+            ctx.fillStyle = '#252a2f';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = '30px Arial';
+            ctx.font = '50px Arial';
             ctx.fillStyle = '#a7aebb';
-            ctx.fillText('链路类型: ', 10, 40);
-            ctx.fillText('调用频率: ', 10, 80);
-            ctx.fillText('平均响应时间: ', 10, 120);
+            ctx.fillText('链路类型: ', 10, 60);
+            ctx.fillText('调用频率: ', 10, 150);
+            ctx.fillText('平均响应时间: ', 10, 240);
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('TracingTo', 150, 40);
-            ctx.fillText(`${line.callPerMinute} 次/分钟`, 150, 80);
-            ctx.fillText(`${line.callPerMinute} ms`, 210, 120);
+            ctx.fillText('TracingTo', 250, 60);
+            ctx.fillText(`${line.callPerMinute} 次/分钟`, 250, 150);
+            ctx.fillText(`${line.callPerMinute} ms`, 350, 240);
         }
         else {
-            canvas.width = 150;
-            canvas.height = 60;
+            canvas.width = 250;
+            canvas.height = 80;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'black';
+            ctx.fillStyle = '#252a2f';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = '30px Arial';
+            ctx.font = '50px Arial';
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('CreateOn', 10, 40);
+            ctx.fillText('CreateOn', 10, 60);
         }
         let texture = new THREE.Texture(canvas);
         texture.needsUpdate = true;
-        let lineText = { geometry: null, material: null, mesh: null };
-        lineText.material = new THREE.MeshBasicMaterial({
+        this.lineInfoText = {
+            geometry: null,
+            material: null,
+            mesh: null,
+            positions: new Float32Array(4)
+        };
+        this.lineInfoText.material = new THREE.MeshBasicMaterial({
             map: texture,
             transparent: true,
-            opacity: 0.5
+            opacity: opacity
         });
-        lineText.mesh = new THREE.Mesh(new THREE.PlaneGeometry(canvas.width * 0.3, canvas.height * 0.3), lineText.material);
         let sourceIndex = this.processedData.nodeInfoMap[line.source].index;
         let targetIndex = this.processedData.nodeInfoMap[line.target].index;
+        this.lineInfoText.positions[0] = sourceIndex;
+        this.lineInfoText.positions[1] = targetIndex;
+        this.lineInfoText.positions[2] = canvas.width * 0.06;
+        this.lineInfoText.positions[3] = canvas.height * 0.06;
+        this.lineInfoText.geometry = new THREE.PlaneGeometry(this.lineInfoText.positions[2], this.lineInfoText.positions[3]);
+        this.lineInfoText.mesh = new THREE.Mesh(this.lineInfoText.geometry, this.lineInfoText.material);
+        this.updateLineInfoText();
+        this.lineInfoText.mesh.name = 'lineInfoText';
+        this.scene.add(this.lineInfoText.mesh);
+    }
+    updateLineInfoText() {
+        let scale = this.camera.position.z / this.getPositionZ(2);
+        this.lineInfoText.mesh.scale.set(scale, scale, scale);
         let fontMeshPosition = [
-            (this.currentPositionStatus[sourceIndex * 2] + this.currentPositionStatus[targetIndex * 2]) / 2,
-            (this.currentPositionStatus[sourceIndex * 2 + 1] + this.currentPositionStatus[targetIndex * 2 + 1]) / 2,
-            0.02
+            (this.currentPositionStatus[this.lineInfoText.positions[0] * 2]
+                + this.currentPositionStatus[this.lineInfoText.positions[1] * 2]
+                + this.lineInfoText.positions[2] * scale) / 2,
+            (this.currentPositionStatus[this.lineInfoText.positions[0] * 2 + 1]
+                + this.currentPositionStatus[this.lineInfoText.positions[1] * 2 + 1]
+                + this.lineInfoText.positions[3] * scale) / 2,
+            0.002
         ];
-        lineText.mesh.position.set(...fontMeshPosition);
-        lineText.mesh.name = 'hlText';
-        this.scene.add(lineText.mesh);
-        this.hlTexts.push(lineText);
+        this.lineInfoText.mesh.position.set(...fontMeshPosition);
     }
     refreshMouseStatus(event) {
         this.mouseStatus.mousePosition.x = event.clientX - this.containerRect.left - this.config.width / 2;
@@ -1294,19 +1334,23 @@ class D3ForceGraph {
         if (event.deltaY < 0) {
             if (this.camera.position.z <= this.config.zoomNear)
                 return;
-            zoom = this.camera.position.z - vector.z;
-            zoom < this.config.zoomNear && vector.multiplyScalar((this.camera.position.z - this.config.zoomNear) / zoom);
+            zoom = this.camera.position.z + vector.z;
+            zoom < this.config.zoomNear
+                && vector.multiplyScalar((this.camera.position.z - this.config.zoomNear - 1) / Math.abs(vector.z));
             this.camera.position.add(vector);
             this.controls.target.add(vector);
         }
         else {
             if (this.camera.position.z >= this.config.zoomFar)
                 return;
-            zoom = this.camera.position.z + vector.z;
-            zoom > this.config.zoomFar && vector.multiplyScalar((this.config.zoomFar - this.camera.position.z) / zoom);
+            zoom = this.camera.position.z - vector.z;
+            zoom > this.config.zoomFar
+                && vector.multiplyScalar((this.config.zoomFar - this.camera.position.z - 1) / Math.abs(vector.z));
             this.camera.position.sub(vector);
             this.controls.target.sub(vector);
         }
+        if (this.lineInfoText)
+            this.updateLineInfoText();
     }
     chartMouseEnterHandler() {
         this.mouseStatus.mouseOnChart = true;
@@ -1380,32 +1424,27 @@ class D3ForceGraph {
         this.renderer.render(this.scene, this.camera);
     }
     getOffset(size1, size2) {
-        let distanceVector = this.camera.position.clone().sub(new THREE.Vector3(0, 0, 0));
-        let nodeSize = size1 / distanceVector.length();
-        let eventNodeSize = size2 / distanceVector.length();
-        let distance = (nodeSize + eventNodeSize) / this.config.width;
-        let nameArr = Object.keys(this.nodes);
-        if (nameArr.length) {
-            let modelViewMatrix = this.nodes[nameArr[0]].mesh.modelViewMatrix;
-            let vector = new THREE.Vector4(0, 0, 0, 1)
-                .applyMatrix4(modelViewMatrix.clone())
-                .applyMatrix4(this.camera.projectionMatrix.clone());
-            let mouseVector = new THREE.Vector4(distance * vector.w, 0, vector.z, 1);
-            let topoMouse = mouseVector
-                .applyMatrix4(this.camera.projectionMatrix.clone().invert())
-                .applyMatrix4(modelViewMatrix.clone().invert());
-            return topoMouse.x;
-        }
-        return 0;
+        let realSize1 = size1 / this.distanceVector.length();
+        let realSize2 = size2 / this.distanceVector.length();
+        let distance = (realSize1 + realSize2) / this.config.width;
+        let vector = new THREE.Vector4(0, 0, 0, 1)
+            .applyMatrix4(this.modelViewMatrix)
+            .applyMatrix4(this.projectionMatrix);
+        let mouseVector = new THREE.Vector4(distance * vector.w, 0, vector.z, 1);
+        let topoMouse = mouseVector
+            .applyMatrix4(this.projectionMatrix.clone().invert())
+            .applyMatrix4(this.modelViewMatrix.clone().invert());
+        return topoMouse.x;
     }
     createTextTexture(text, width, height, fontSize) {
+        if (text.length > 6)
+            text = text.slice(0, 6) + '..';
         let canvas = document.createElement('canvas');
         let ctx = canvas.getContext('2d');
         canvas.width = width;
         canvas.height = height;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = `Bold ${fontSize}px Arial`;
-        ctx.textAlign = 'center';
         ctx.fillStyle = 'rgb(204, 204, 204)';
         ctx.fillText(text, width / 2, height / 2 + fontSize / 4);
         let fontTexture = new THREE.Texture(canvas);
@@ -1417,15 +1456,14 @@ class D3ForceGraph {
             return 1;
         }
         else if (speed < 100) {
-            return 2;
-        }
-        else if (speed < 500) {
             return 3;
         }
-        else {
-            return 4;
+        else if (speed < 500) {
+            return 5;
         }
-        // return 1
+        else {
+            return 7;
+        }
     }
     getEventLabel(event) {
         if (event < 10)
@@ -1447,7 +1485,7 @@ class D3ForceGraph {
     // DISTANCE: 20,25,40,50
     // STRENGTH: 3,5,8,10
     getPositionZ(nodesCount) {
-        return (3.04139028390183E+16 - 150.128392537138) / (1 + Math.pow(nodesCount / 2.12316143430556E+31, -0.461309470817812)) + 150.128392537138;
+        return (3.04139028390183E+16 - 150.128392537138) / (1 + Math.pow(nodesCount / 2.12316143430556E+31, -0.461309470817812));
     }
     getDistance(nodesCount) {
         return (60.5026920478786 - 19.6364818002641) / (1 + Math.pow(nodesCount / 11113.7184968341, -0.705912886177758)) + 19.6364818002641;

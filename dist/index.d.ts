@@ -146,6 +146,9 @@ export declare class D3ForceGraph {
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
     controls: any;
+    modelViewMatrix: THREE.Matrix4;
+    projectionMatrix: THREE.Matrix4;
+    distanceVector: THREE.Vector3;
     nodes: {
         [key: string]: ItemMesh;
     };
@@ -161,6 +164,7 @@ export declare class D3ForceGraph {
     circles: ItemMesh;
     arrows: ItemMesh;
     callPerMinuteUnits: ItemMesh;
+    lineInfoText: ItemMesh;
     hlNodes: Array<MaterialSegment>;
     hlLines: Array<MaterialSegment>;
     hlCircles: Array<number>;
@@ -205,20 +209,22 @@ export declare class D3ForceGraph {
     renderTopo(): void;
     renderLineAnimation(): void;
     checkFinalStatus(): void;
+    filterNodes(typeArr: Array<string>): void;
     updateHighLight(): void;
     highlightNodeType(name: string, index: number): void;
     highlightLineType(name: string, index: number): void;
     highlightCircleType(index: number): void;
     unhighlight(): void;
     resetAllMeshColor(): void;
-    prepareDarkenData(typeArr: Array<string>): void;
+    darkenNodes(typeArr: Array<string>): void;
     addHighLight(): void;
     highlightNodes(isHighlight: boolean): void;
     highlightLines(isHighlight: boolean): void;
     highlightArrows(isHighlight: boolean): void;
     highlightCircles(isHighlight: boolean): void;
     addHlTextsMesh(): void;
-    addLineTextMesh(line: Link): void;
+    addLineTextMesh(line: Link, opacity: number): void;
+    updateLineInfoText(): void;
     refreshMouseStatus(event: MouseEvent): void;
     mouseMoveHandler(event: MouseEvent): void;
     mouseOutHandler(): void;

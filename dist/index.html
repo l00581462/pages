@@ -1,26 +1,32 @@
 <html><head><title>Demo</title><script src="../dist/d3-force-graph.js"></script><style>.setting {
-        display: flex;
-        height: 50px;
-        line-height: 50px;
-        justify-content: space-around;
+        padding: 10px;
+        width: 200px;
+        line-height: 25px;
         background: #242424;
         color: #aaaaaa;
       }
       body {
         padding: 0;
         margin: 0;
-      }</style></head><body><div class="setting"><div><span>nodeNum </span><select id="nodeNum"><option value="2" selected="selected">2</option><option value="10">10</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="5000">5000</option><option value="10000">10000</option><option value="50000">50000</option><option value="100000">100000</option></select></div><div><span>linkNum </span><span id="linkNum"></span></div></div><div id="container"></div><script>let graph = null;
+        display: flex;
+      }</style></head><body><div class="setting"><div><span>nodeNum </span><select id="nodeNum"><option value="2" selected="selected">2</option><option value="10">10</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="5000">5000</option><option value="10000">10000</option><option value="50000">50000</option><option value="100000">100000</option></select></div><div><span>linkNum </span><span id="linkNum"></span></div><div id="nodeFilter"><p>节点类型</p><p><input type="checkbox" checked="checked" name="nodeType" value="Application"/>Application</p><p><input type="checkbox" checked="checked" name="nodeType" value="Pod"/>Pod</p><p><input type="checkbox" checked="checked" name="nodeType" value="Process"/>Process</p><p><input type="checkbox" checked="checked" name="nodeType" value="Workload"/>Workload</p><p><input type="checkbox" checked="checked" name="nodeType" value="Node"/>Node</p><p><input type="checkbox" checked="checked" name="nodeType" value="MiddleWare"/>MiddleWare</p></div></div><div id="container"></div><script>let graph = null;
       window.onload = () => {
         let $container = document.getElementById("container");
         let $nodeNum = document.getElementById("nodeNum");
+        let $nodeFilter = document.getElementById("nodeFilter");
+        let nodeCheckBoxs = document.getElementsByName("nodeType");
         let $linkNum = document.getElementById("linkNum");
         let nodeType = ["Application", "Pod", "Process", "Workload", "Node", "MiddleWare"];
         let middleWareNodeType = ["cache", "database", "mq"];
         let lineType = ["CreateOn", "TracingTo"];
         changeNodeNum();
         $nodeNum.addEventListener("change", changeNodeNum);
+        $nodeFilter.addEventListener("click", filterNodes)
 
         function changeNodeNum() {
+          for(let i = 0; i < nodeCheckBoxs.length; i++){
+            nodeCheckBoxs[i].checked = true
+          }
           let testData = {
             nodes: [],
             links: [],
@@ -58,8 +64,18 @@
             graph.destroy();
           }
           graph = new D3ForceGraph($container, testData, {
-            width: window.innerWidth,
-            height: window.innerHeight - 50,
+            width: window.innerWidth - 200,
+            height: window.innerHeight,
           });
+        }
+
+        function filterNodes(e) {
+          if(e.target.tagName === 'input'.toUpperCase()) {
+            let arr = []
+            for(let i = 0; i < nodeCheckBoxs.length; i++){
+              !nodeCheckBoxs[i].checked && arr.push(nodeCheckBoxs[i].value)
+            }
+            graph && graph.filterNodes(arr)
+          }
         }
       };</script><script src="d3-force-graph.js"></script></body></html>
