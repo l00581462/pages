@@ -36,7 +36,6 @@ interface GraphBaseConfig {
     height: number;
     weight?: number;
     dashSize?: number;
-    dashScale?: number;
     gapSize?: number;
     nodeSize?: number;
     eventNodeSize?: number;
@@ -44,11 +43,9 @@ interface GraphBaseConfig {
     circleSize?: number;
     textSize?: number;
     lineWidth?: number;
-    showStatTable?: boolean;
     zoomScale?: number;
     zoomNear?: number;
     zoomFar?: number;
-    debug?: boolean;
 }
 interface D3ForceData {
     nodes: Array<{
@@ -107,6 +104,7 @@ interface GraphPerfInfo {
     targetTick: number;
     intervalTime: number;
     layouting: boolean;
+    isEndTime: boolean;
 }
 interface MouseStatus {
     mouseOnChart: boolean;
@@ -138,9 +136,7 @@ export declare class D3ForceGraph {
     currentPositionStatus: Float32Array;
     cachePositionStatus: Float32Array;
     mouseStatus: MouseStatus;
-    rafId: number;
     highlighted: string;
-    throttleTimer: number;
     events: mitt.Emitter;
     scene: THREE.Scene;
     renderer: THREE.WebGLRenderer;
@@ -204,10 +200,8 @@ export declare class D3ForceGraph {
     start(): void;
     installControls(): void;
     startRender(): void;
-    stopRender(): void;
     render(): void;
     renderTopo(): void;
-    renderLineAnimation(): void;
     checkFinalStatus(): void;
     filterNodes(typeArr: Array<string>): void;
     updateHighLight(): void;
@@ -227,23 +221,16 @@ export declare class D3ForceGraph {
     updateLineInfoText(): void;
     refreshMouseStatus(event: MouseEvent): void;
     mouseMoveHandler(event: MouseEvent): void;
-    mouseOutHandler(): void;
-    mouseDownHandler(event: MouseEvent): void;
-    mouseUpHandler(): void;
     mouseWheelHandler(event: MouseWheelEvent): void;
     mouseMoveHandlerBinded: any;
     mouseWheelHandlerBinded: any;
-    mouseDownHandlerBinded: any;
-    mouseUpHandlerBinded: any;
-    chartMouseEnterHandler(): void;
-    chartMouseLeaveHandler(): void;
     bindEvent(): void;
     unbindEvent(): void;
     destroy(): void;
     resize(width: number, height: number): void;
     getOffset(size1: number, size2: number): number;
     createTextTexture(text: string, width: number, height: number, fontSize: number): THREE.Texture;
-    getLineWidth(speed: number): number;
+    getLineWidth(callPerMinute: number): number;
     getEventLabel(event: number): string;
     getNodeLabel(type: string, middleWareType: string): string;
     getPositionZ(nodesCount: number): number;

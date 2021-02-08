@@ -37,15 +37,12 @@ const GRAPH_BASE_CONFIG = {
     arrowSize: NODE_SIZE * 0.8,
     eventNodeSize: NODE_SIZE * 0.5,
     textSize: NODE_SIZE * 0.25,
-    dashSize: 5,
-    gapSize: 3,
-    dashScale: 1,
-    lineWidth: 1,
-    showStatTable: true,
+    dashSize: 8,
+    gapSize: 5,
+    lineWidth: 2,
     zoomScale: 15,
     zoomNear: 75,
-    zoomFar: 30000,
-    debug: false
+    zoomFar: 30000
 };
 const GRAPH_DEFAULT_PERF_INFO = {
     nodeCounts: 0,
@@ -57,7 +54,8 @@ const GRAPH_DEFAULT_PERF_INFO = {
     prevTickTime: 0,
     targetTick: 0,
     intervalTime: 0,
-    layouting: false
+    layouting: false,
+    isEndTime: false
 };
 class D3ForceGraph {
     constructor(dom, data, graphBaseConfig = GRAPH_BASE_CONFIG) {
@@ -103,8 +101,6 @@ class D3ForceGraph {
         this.hlTexts = [];
         this.mouseMoveHandlerBinded = this.mouseMoveHandler.bind(this);
         this.mouseWheelHandlerBinded = this.mouseWheelHandler.bind(this);
-        this.mouseDownHandlerBinded = this.mouseDownHandler.bind(this);
-        this.mouseUpHandlerBinded = this.mouseUpHandler.bind(this);
         this.$container = dom;
         this.data = data;
         this.config = Object.assign({}, GRAPH_BASE_CONFIG, graphBaseConfig);
@@ -120,7 +116,6 @@ class D3ForceGraph {
             this.prepareScene();
             this.prepareBasicMesh();
             this.installControls();
-            this.bindEvent();
             this.initWorker();
             this.start();
         }
@@ -280,7 +275,7 @@ class D3ForceGraph {
         let dashed;
         let tracingToLinkIndex;
         if (link.label === 'CreateOn') {
-            lineWidth = 2;
+            lineWidth = this.config.lineWidth;
             lineType = link.label;
             dashed = false;
             tracingToLinkIndex = -1;
@@ -335,9 +330,9 @@ class D3ForceGraph {
         let targetNodeIndex = targetNode.index;
         let sourceNodeType = sourceNode.label;
         let targetNodeType = targetNode.label;
-        let speedStr = link.callPerMinute ? '' + link.callPerMinute : '';
-        for (let i = speedStr.length - 1, j = 0; i >= 0; i--, j++) {
-            let num = speedStr[i];
+        let CPMStr = link.callPerMinute ? '' + link.callPerMinute : '';
+        for (let i = CPMStr.length - 1, j = 0; i >= 0; i--, j++) {
+            let num = CPMStr[i];
             if (!this.callPerMinuteNums[num]) {
                 this.callPerMinuteNums[num] = {
                     config: {
@@ -455,13 +450,15 @@ class D3ForceGraph {
             item.geometry = new LineSegmentsGeometry_1.LineSegmentsGeometry();
             item.positions = new Float32Array(config.count * 6);
             item.colors = new Float32Array(config.count * 6);
+            let lineWidth = name === 'CreateOn' ?
+                config.lineWidth :
+                config.lineWidth * this.getPositionZ(5) / this.camera.position.z;
             item.material = new LineMaterial_1.LineMaterial({
-                linewidth: config.lineWidth,
+                linewidth: lineWidth,
                 dashed: config.dashed,
                 vertexColors: true,
                 dashSize: this.config.dashSize,
-                gapSize: this.config.gapSize,
-                dashScale: this.config.dashScale
+                gapSize: this.config.gapSize
             });
             if (config.dashed)
                 item.material.defines.USE_DASH = '';
@@ -584,7 +581,7 @@ class D3ForceGraph {
             item.geometry.setAttribute('color', new THREE.BufferAttribute(item.colors, 4));
             item.geometry.computeBoundingSphere();
             item.mesh = new THREE.Points(item.geometry, item.material);
-            item.mesh.name = 'speed';
+            item.mesh.name = 'callPerMinuteNums';
             this.scene.add(item.mesh);
         });
     }
@@ -619,7 +616,7 @@ class D3ForceGraph {
         item.geometry.setAttribute('color', new THREE.BufferAttribute(item.colors, 4));
         item.geometry.computeBoundingSphere();
         item.mesh = new THREE.Points(item.geometry, item.material);
-        item.mesh.name = 'speedUnits';
+        item.mesh.name = 'callPerMinuteUnits';
         this.scene.add(item.mesh);
     }
     // 更新节点与线的位置
@@ -814,6 +811,7 @@ class D3ForceGraph {
                         if (event.data.currentTick === 2) {
                             this.currentPositionStatus = this.targetPositionStatus;
                             this.startRender();
+                            this.$container.addEventListener('wheel', this.mouseWheelHandlerBinded);
                         }
                         this.targetPositionStatus = new Float32Array(event.data.nodes);
                         // 缓存当前 this.currentPositionStatus
@@ -835,6 +833,7 @@ class D3ForceGraph {
                 }
                 case ('end'): {
                     this.perfInfo.layouting = false;
+                    this.perfInfo.isEndTime = true;
                     this.targetPositionStatus = new Float32Array(event.data.nodes);
                     break;
                 }
@@ -852,28 +851,14 @@ class D3ForceGraph {
     }
     // 启动渲染
     startRender() {
-        if (!this.rafId) {
-            this.rafId = requestAnimationFrame(this.render.bind(this));
-        }
-    }
-    // 停止渲染，节约性能
-    stopRender() {
-        if (this.rafId) {
-            cancelAnimationFrame(this.rafId);
-            this.rafId = null;
-        }
+        requestAnimationFrame(this.render.bind(this));
     }
     render() {
-        this.rafId = null;
-        // 限制放大缩小距离，最近75，最远16000
-        this.perfInfo.layouting && this.renderTopo();
-        if (!this.perfInfo.layouting) {
-            this.renderLineAnimation();
-            this.updateHighLight();
-        }
+        this.renderTopo();
         this.checkFinalStatus();
         this.renderer.render(this.scene, this.camera);
-        this.startRender();
+        // 循环渲染
+        this.perfInfo.layouting && this.startRender();
     }
     renderTopo() {
         // 节点数大于1000时，执行补间动画
@@ -894,33 +879,26 @@ class D3ForceGraph {
             }
         }
     }
-    renderLineAnimation() {
-        let scale = this.getPositionZ(2) / this.camera.position.z;
-        Object.keys(this.lines).forEach((name) => {
-            if (name === 'CreateOn')
-                return;
-            let lineWidth = parseInt(name[name.length - 1], 10);
-            this.lines[name].material.linewidth = lineWidth * scale;
-            this.lines[name].material.dashOffset -= 0.3;
-        });
-    }
     checkFinalStatus() {
-        if (!this.perfInfo.layouting && this.currentPositionStatus && (this.currentPositionStatus[0] !== this.targetPositionStatus[0])) {
+        if (!this.perfInfo.layouting && this.currentPositionStatus && this.perfInfo.isEndTime) {
+            this.perfInfo.isEndTime = false;
             this.currentPositionStatus = this.targetPositionStatus;
             this.updatePosition(this.currentPositionStatus);
             this.updateCirclesPosition(this.currentPositionStatus);
             this.updateArrowsPosition(this.currentPositionStatus);
             this.updateCallPerMinuteNumsPosition(this.currentPositionStatus);
             this.updateCallPerMinuteUnitsPosition(this.currentPositionStatus);
+            this.startRender();
+            this.bindEvent();
         }
     }
     filterNodes(typeArr) {
         let formatArr = [];
         for (let i = 0; i < typeArr.length; i++) {
             if (typeArr[i].toUpperCase() === 'MIDDLEWARE') {
-                ['mq', 'database', 'cache'].forEach(val => formatArr.push(`${typeArr[i]}_${val}`.toUpperCase()));
+                ['mq', 'database', 'cache'].forEach(val => formatArr.push(this.getNodeLabel(typeArr[i], val)));
             }
-            formatArr.push(typeArr[i].toUpperCase());
+            formatArr.push(this.getNodeLabel(typeArr[i], ''));
         }
         this.darkenNodes(formatArr);
     }
@@ -928,11 +906,10 @@ class D3ForceGraph {
     updateHighLight() {
         let ray = new THREE.Raycaster();
         ray.setFromCamera(this.mouseStatus.mouseWorldPosition, this.camera);
-        ray.params.Points.threshold = 2;
+        ray.params.Points.threshold = 5;
         let intersects = ray.intersectObjects(this.scene.children).filter(e => !e.object.name.startsWith('hl'));
         if (intersects.length > 0) {
-            let object = intersects.filter(e => e.object.name.startsWith('basePoints'));
-            let target = object.length > 0 ? object[0] : intersects[0];
+            let target = intersects[0];
             if (!target.object)
                 return;
             let type = target.object.name.split('-')[0];
@@ -952,6 +929,7 @@ class D3ForceGraph {
             this.unhighlight();
             this.mouseStatus.mouseDownNodeStatus = false;
         }
+        this.startRender();
     }
     highlightNodeType(name, index) {
         let ray = new THREE.Raycaster();
@@ -1043,9 +1021,10 @@ class D3ForceGraph {
         }
     }
     unhighlight() {
-        let text = this.scene.getObjectByName('hlText');
+        for (let i = 0; i < this.hlTexts.length; i++) {
+            this.scene.remove(this.hlTexts[i].mesh);
+        }
         let lineInfoText = this.scene.getObjectByName('lineInfoText');
-        this.scene.remove(text);
         this.scene.remove(lineInfoText);
         this.highlighted = null;
         this.$container.classList.remove('hl');
@@ -1120,6 +1099,7 @@ class D3ForceGraph {
         this.arrows.geometry.attributes.color = new THREE.BufferAttribute(this.arrows.colors, 4);
         this.circles.geometry.attributes.color = new THREE.BufferAttribute(this.circles.colors, 4);
         this.callPerMinuteUnits.geometry.attributes.color = new THREE.BufferAttribute(this.callPerMinuteUnits.colors, 4);
+        this.startRender();
     }
     // 根据 id 高亮节点
     addHighLight() {
@@ -1232,7 +1212,6 @@ class D3ForceGraph {
     addLineTextMesh(line, opacity) {
         let canvas = document.createElement('canvas');
         let ctx = canvas.getContext('2d');
-        let scale;
         if (line.label === 'TracingTo') {
             canvas.width = 560;
             canvas.height = 260;
@@ -1306,24 +1285,12 @@ class D3ForceGraph {
     }
     mouseMoveHandler(event) {
         this.refreshMouseStatus(event);
-    }
-    mouseOutHandler() {
-        this.mouseStatus.mouseOnChart = false;
-        this.mouseStatus.mousePosition.x = -9999;
-        this.mouseStatus.mousePosition.y = -9999;
-    }
-    mouseDownHandler(event) {
-        console.log('down');
-        this.refreshMouseStatus(event);
-        this.mouseStatus.mouseDownStatus = true;
-    }
-    mouseUpHandler() {
-        console.log('up');
-        this.mouseStatus.mouseDownStatus = false;
-        this.mouseStatus.mouseDownNodeStatus = false;
-        // this.controls.enablePan = true
+        this.updateHighLight();
     }
     mouseWheelHandler(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.refreshMouseStatus(event);
         let vector = new THREE.Vector3(this.mouseStatus.mouseWorldPosition.x, this.mouseStatus.mouseWorldPosition.y, 0.1)
             .unproject(this.camera)
             .sub(this.camera.position)
@@ -1347,39 +1314,28 @@ class D3ForceGraph {
             this.camera.position.sub(vector);
             this.controls.target.sub(vector);
         }
+        this.controls.update();
         if (this.lineInfoText)
             this.updateLineInfoText();
-    }
-    chartMouseEnterHandler() {
-        this.mouseStatus.mouseOnChart = true;
-        clearTimeout(this.throttleTimer);
-        this.throttleTimer = null;
-        // 开启渲染
-        // this.startRender()
-    }
-    chartMouseLeaveHandler() {
-        this.mouseStatus.mouseOnChart = false;
-        // 关闭渲染
-        // if(!this.perfInfo.layouting && !this.lockHighlightToken) {
-        //   this.stopRender()
-        // }
+        // 线条宽度随摄像机放大缩小
+        Object.keys(this.lines).forEach((name) => {
+            if (name === 'CreateOn')
+                return;
+            let lineWidth = parseInt(name[name.length - 1], 10);
+            this.lines[name].material.linewidth = lineWidth * this.getPositionZ(5) / this.camera.position.z;
+        });
+        this.startRender();
     }
     // 绑定事件
     bindEvent() {
         this.$container.addEventListener('mousemove', this.mouseMoveHandlerBinded);
-        this.$container.addEventListener('mousedown', this.mouseDownHandlerBinded);
-        this.$container.addEventListener('mouseup', this.mouseUpHandlerBinded);
-        this.$container.addEventListener('wheel', this.mouseWheelHandlerBinded);
     }
     // 解绑事件
     unbindEvent() {
         this.$container.removeEventListener('mousemove', this.mouseMoveHandlerBinded);
-        this.$container.removeEventListener('mousedown', this.mouseDownHandlerBinded);
-        this.$container.removeEventListener('mouseup', this.mouseUpHandlerBinded);
         this.$container.removeEventListener('wheel', this.mouseWheelHandlerBinded);
     }
     destroy() {
-        this.stopRender();
         this.unbindEvent();
         this.scene = null;
         this.camera = null;
@@ -1449,14 +1405,14 @@ class D3ForceGraph {
         fontTexture.needsUpdate = true;
         return fontTexture;
     }
-    getLineWidth(speed) {
-        if (speed < 50) {
+    getLineWidth(callPerMinute) {
+        if (callPerMinute < 50) {
             return 1;
         }
-        else if (speed < 100) {
+        else if (callPerMinute < 100) {
             return 3;
         }
-        else if (speed < 500) {
+        else if (callPerMinute < 500) {
             return 5;
         }
         else {
